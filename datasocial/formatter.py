@@ -31,7 +31,7 @@ def render_report(report: dict) -> str:
     lines.extend(["", "Trend Videos 7D (clips with unusually high views vs the same channel in the last 7 days):"])
     lines.extend(render_trend_block(modules["trendVideos7D"]))
 
-    lines.extend(["", "Daily Views 7D (highest and lowest total system views in the last 7 days):"])
+    lines.extend(["", "Daily Views 7D (highest total system views in the last 7 days, across all fetched KOL data):"])
     lines.extend(render_daily_summary(modules["dailyViews7D"]))
 
     lines.extend(["", "Daily Post Count 7D (highest and lowest total published clips in the last 7 days):"])
@@ -67,7 +67,7 @@ def render_seatalk_report(report: dict, *, title: str = "Datasocial Report") -> 
     lines.extend(render_seatalk_platform_block(modules["topContentByPlatform"]["1D"]))
     lines.extend(["", "**Trend Videos 7D**", "_Clips with unusually high views vs the same channel in the last 7 days._"])
     lines.extend(render_seatalk_trend_block(modules["trendVideos7D"]))
-    lines.extend(["", "**Daily Views 7D**", "_Highest and lowest total system views in the last 7 days._"])
+    lines.extend(["", "**Daily Views 7D**", "_Highest total system views in the last 7 days across all fetched KOL data._"])
     lines.extend(render_seatalk_daily_summary(modules["dailyViews7D"], suffix="views"))
     lines.extend(["", "**Daily Posts 7D**", "_Highest and lowest total published clips in the last 7 days._"])
     lines.extend(render_seatalk_daily_post_summary(modules["dailyPostCount7D"], suffix="posts"))
@@ -100,7 +100,6 @@ def render_trend_block(items: list[dict]) -> list[str]:
 def render_daily_summary(section: dict) -> list[str]:
     return [
         f"- highest={section['peakDate']} ({section['peakValue']})",
-        f"- lowest={section['lowDate']} ({section['lowValue']})",
         f"- peakPostingHour={section['peakPostingHourRange']} ({section['peakPostingHourCount']} clips)",
     ]
 
@@ -158,7 +157,6 @@ def render_seatalk_trend_block(items: list[dict]) -> list[str]:
 def render_seatalk_daily_summary(section: dict, *, suffix: str) -> list[str]:
     return [
         f"- Highest: {section['peakDate']} | {format_number(section['peakValue'])} {suffix}",
-        f"- Lowest: {section['lowDate']} | {format_number(section['lowValue'])} {suffix}",
         f"- Peak posting hour: {section['peakPostingHourRange']} | {section['peakPostingHourCount']} clips",
     ]
 
