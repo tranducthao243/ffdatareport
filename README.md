@@ -98,6 +98,7 @@ Workflow scaffold:
 - [.github/workflows/ffvn-manual-control.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-manual-control.yml)
 - [.github/workflows/seatalk-test-ping.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/seatalk-test-ping.yml)
 - [docs/GITHUB_DEPLOYMENT.md](C:/Users/admin/OneDrive/Documents/datatool/docs/GITHUB_DEPLOYMENT.md)
+- [docs/ACTIONS_OPERATOR_GUIDE.md](C:/Users/admin/OneDrive/Documents/datatool/docs/ACTIONS_OPERATOR_GUIDE.md)
 
 Required GitHub Secrets:
 
@@ -120,6 +121,12 @@ Recommended production setup:
 - use the scheduled fetch workflow to prepare data before 09:30 Vietnam time
 - use the scheduled send workflow to deliver the prepared report at 10:30 Vietnam time
 - use the SeaTalk test ping workflow when you only want to validate bot delivery quickly
+
+## Operator guide
+
+If you or your teammates need a simple runbook for GitHub Actions usage, read:
+
+- [docs/ACTIONS_OPERATOR_GUIDE.md](C:/Users/admin/OneDrive/Documents/datatool/docs/ACTIONS_OPERATOR_GUIDE.md)
 
 ## Notes
 
