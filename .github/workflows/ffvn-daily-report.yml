@@ -1,0 +1,96 @@
+name: FFVN Daily Report (Scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 2 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffvn-daily-report
+  cancel-in-progress: false
+
+jobs:
+  ffvn-daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ffvn-reporting
+    env:
+      DATASOCIAL_GRAPHQL_ENDPOINT: https://socialdata.garena.vn/graphql
+      DATASOCIAL_ORIGIN: https://socialdata.garena.vn
+      DATASOCIAL_APP_ID: 2
+      DATASOCIAL_APP_SLUG: ffvn
+      DATASOCIAL_TIMEOUT: 300
+      DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
+      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FFVN daily report
+        run: python -m datasocial --preset ffvn_daily --send-seatalk
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("outputs/ffvn_daily_latest.json")
+          summary_path = Path("${GITHUB_STEP_SUMMARY}")
+          if not path.exists():
+              summary_path.write_text("FFVN daily report did not produce a JSON artifact.\n", encoding="utf-8")
+              raise SystemExit(0)
+
+          report = json.loads(path.read_text(encoding="utf-8"))
+          modules = report.get("modules", {})
+          overview = modules.get("overview7D", {})
+          top_content = modules.get("topContentByPlatform", {}).get("1D", {})
+          lines = [
+              "# FFVN Daily Report",
+              "",
+              f"- Generated: `{report.get('generatedAt', '-')}`",
+              f"- Window: `{report.get('meta', {}).get('window', {}).get('startDate', '-')} -> {report.get('meta', {}).get('window', {}).get('endDate', '-')}`",
+              f"- Total views 7D: `{overview.get('totalView', 0)}`",
+              f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
+              f"- Avg view 7D: `{overview.get('averageView', 0)}`",
+              "",
+              "## Top Content 1D",
+          ]
+
+          for platform in ("tiktok", "youtube"):
+              rows = top_content.get(platform, [])[:3]
+              label = platform.capitalize()
+              lines.append(f"### {label}")
+              if not rows:
+                  lines.append("- No data")
+                  continue
+              for row in rows:
+                  lines.append(f"- {row.get('channelName', '-')} | {row.get('view', 0)} | {row.get('url', '-')}")
+
+          summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload latest artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffvn-daily-latest
+          path: |
+            outputs/ffvn_daily_latest.csv
+            outputs/ffvn_daily_latest.json
+          if-no-files-found: warn

@@ -1,0 +1,160 @@
+name: FFVN Report Control Panel
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: "Which report preset to run"
+        required: true
+        default: "ffvn_daily"
+        type: choice
+        options:
+          - ffvn_daily
+          - ffvn_weekly
+      send_seatalk:
+        description: "Send report to SeaTalk group"
+        required: true
+        default: false
+        type: boolean
+      fetch_window:
+        description: "Auto fetch window"
+        required: true
+        default: "7D"
+        type: choice
+        options:
+          - 1D
+          - 4D
+          - 7D
+          - 30D
+      report_mode:
+        description: "Anchor report to the previous full day or include today"
+        required: true
+        default: "complete_previous_day"
+        type: choice
+        options:
+          - complete_previous_day
+          - today_so_far
+      timeout_seconds:
+        description: "Social Data request timeout in seconds"
+        required: true
+        default: "300"
+        type: string
+      seatalk_title:
+        description: "SeaTalk message title"
+        required: true
+        default: "Daily FFVN KOL Report"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffvn-report-control
+  cancel-in-progress: false
+
+jobs:
+  run-ffvn-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ffvn-reporting
+    env:
+      DATASOCIAL_GRAPHQL_ENDPOINT: https://socialdata.garena.vn/graphql
+      DATASOCIAL_ORIGIN: https://socialdata.garena.vn
+      DATASOCIAL_APP_ID: 2
+      DATASOCIAL_APP_SLUG: ffvn
+      DATASOCIAL_TIMEOUT: ${{ inputs.timeout_seconds }}
+      SEND_SEATALK: ${{ inputs.send_seatalk }}
+      DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
+      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Stamp run metadata
+        shell: bash
+        run: echo "RUN_STAMP=$(date -u +%Y%m%dT%H%M%SZ)" >> "$GITHUB_ENV"
+
+      - name: Run FFVN report
+        shell: bash
+        run: |
+          args=(
+            -m datasocial
+            --preset "${{ inputs.preset }}"
+            --fetch-window "${{ inputs.fetch_window }}"
+            --report-mode "${{ inputs.report_mode }}"
+            --seatalk-title "${{ inputs.seatalk_title }}"
+          )
+
+          if [[ "${{ inputs.send_seatalk }}" == "true" ]]; then
+            args+=(--send-seatalk)
+          fi
+
+          python "${args[@]}"
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("outputs/ffvn_daily_latest.json")
+          summary_path = Path("${GITHUB_STEP_SUMMARY}")
+          if not path.exists():
+              summary_path.write_text("FFVN control-panel run did not produce a JSON artifact.\n", encoding="utf-8")
+              raise SystemExit(0)
+
+          report = json.loads(path.read_text(encoding="utf-8"))
+          modules = report.get("modules", {})
+          overview = modules.get("overview7D", {})
+          top_kols = modules.get("topKols7D", {})
+          lines = [
+              "# FFVN Control Run",
+              "",
+              f"- Preset: `${{ inputs.preset }}`",
+              f"- Generated: `{report.get('generatedAt', '-')}`",
+              f"- Fetch window: `{report.get('meta', {}).get('windowLabel', '-')}`",
+              f"- Report mode: `{report.get('meta', {}).get('reportMode', '-')}`",
+              f"- SeaTalk sent: `{os.environ.get('SEND_SEATALK', 'false').lower()}`",
+              f"- Total views 7D: `{overview.get('totalView', 0)}`",
+              f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
+              "",
+              "## Top KOLs 7D",
+          ]
+
+          for platform in ("tiktok", "youtube"):
+              rows = top_kols.get(platform, [])[:3]
+              label = platform.capitalize()
+              lines.append(f"### {label}")
+              if not rows:
+                  lines.append("- No data")
+                  continue
+              for row in rows:
+                  lines.append(f"- {row.get('channelName', '-')} | {row.get('totalView', 0)} | posts={row.get('postCount', 0)}")
+
+          summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffvn-control-${{ env.RUN_STAMP }}
+          path: |
+            outputs/ffvn_daily_latest.csv
+            outputs/ffvn_daily_latest.json
+            outputs/ffvn_weekly_latest.csv
+            outputs/ffvn_weekly_latest.json
+          if-no-files-found: warn

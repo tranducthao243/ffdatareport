@@ -1,0 +1,17 @@
+.env
+.env.*
+.venv/
+outputs/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+dist/
+build/
+*.egg-info/
+Thumbs.db
+Desktop.ini

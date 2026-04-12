@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+
+from .analysis import build_report
+from .config import DEFAULT_APP_ID, DEFAULT_PER_PAGE, Settings
+from .display import print_posts
+from .exceptions import DatasocialError
+from .exporter import (
+    DEFAULT_EXPORT_METRIC_DURATION,
+    DEFAULT_EXPORT_METRIC_IDS,
+    build_export_report,
+    export_rows_to_csv_bytes,
+    parse_export_csv,
+)
+from .formatter import render_report, render_seatalk_report
+from .fetcher import GraphQLClient
+from .parser import normalize_post, parse_list_post_response
+from .presets import apply_preset_defaults, load_preset
+from .seatalk import SeaTalkClient, SeaTalkSettings
+from .timewindows import DEFAULT_REPORT_TZ, build_date_window
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="datasocial",
+        description="Fetch, normalize, analyze, and deliver private Social Data reports.",
+    )
+    parser.add_argument("--endpoint", help="Override GraphQL endpoint.")
+    parser.add_argument("--preset", help="Load a JSON preset from the presets directory, e.g. ffvn_daily.")
+    parser.add_argument("--usession", help="Auth cookie value. Falls back to DATASOCIAL_USESSION.")
+    parser.add_argument("--app-slug", help="App slug used to mimic browser referer, e.g. ffvn.")
+    parser.add_argument(
+        "--app-id",
+        type=int,
+        default=DEFAULT_APP_ID,
+        help="Required GraphQL appId. Falls back to DATASOCIAL_APP_ID.",
+    )
+    parser.add_argument("--created-at-gte", help="Lower bound for createdAt filter. Auto-computed when omitted.")
+    parser.add_argument("--created-at-lte", help="Upper bound for createdAt filter. Auto-computed when omitted.")
+    parser.add_argument(
+        "--report-mode",
+        choices=["complete_previous_day", "today_so_far"],
+        default="complete_previous_day",
+        help="Anchor rolling windows to the previous full day or include today_so_far.",
+    )
+    parser.add_argument(
+        "--fetch-window",
+        choices=["1D", "4D", "7D", "30D"],
+        default="7D",
+        help="Maximum automatic fetch window when explicit dates are not provided.",
+    )
+    parser.add_argument(
+        "--report-timezone",
+        default=DEFAULT_REPORT_TZ,
+        help="Timezone used for dynamic windows and export normalization.",
+    )
+    parser.add_argument("--page", type=int, default=0, help="Zero-based page number.")
+    parser.add_argument("--per-page", type=int, default=DEFAULT_PER_PAGE, help="Page size.")
+    parser.add_argument("--all-pages", action="store_true", help="Fetch all pages from listPost.")
+    parser.add_argument("--max-pages", type=int, help="Optional cap when using --all-pages.")
+    parser.add_argument("--report", action="store_true", help="Generate a report instead of printing raw posts.")
+    parser.add_argument("--fetch-only", action="store_true", help="Fetch data only, do not analyze.")
+    parser.add_argument("--analyze-only", action="store_true", help="Analyze previously saved export data only.")
+    parser.add_argument("--use-export", action="store_true", help="Use exportInsight for richer reporting data.")
+    parser.add_argument("--chunk-by-day", action="store_true", help="Split export fetch into daily windows.")
+    parser.add_argument("--chunk-by-category", action="store_true", help="Split export fetch by category id.")
+    parser.add_argument(
+        "--category-id",
+        type=int,
+        action="append",
+        dest="category_ids",
+        help="Repeatable category filter.",
+    )
+    parser.add_argument(
+        "--platform-id",
+        type=int,
+        action="append",
+        dest="platform_ids",
+        help="Repeatable channel platform filter.",
+    )
+    parser.add_argument(
+        "--channel-id",
+        type=int,
+        action="append",
+        dest="channel_ids",
+        help="Repeatable channel filter.",
+    )
+    parser.add_argument("--hashtag", action="append", dest="hashtags", help="Repeatable hashtag filter.")
+    parser.add_argument(
+        "--event-hashtag",
+        action="append",
+        dest="event_hashtags",
+        help="Repeatable event hashtag filter. Reserved for future campaign module metadata.",
+    )
+    parser.add_argument("--top-limit", type=int, default=5, help="Limit per ranked report section.")
+    parser.add_argument(
+        "--trend-min-views",
+        type=int,
+        default=200000,
+        help="Minimum views required for 7D abnormal trend videos.",
+    )
+    parser.add_argument(
+        "--metric-id",
+        type=int,
+        action="append",
+        dest="metric_ids",
+        help="Repeatable export metric id. Defaults to the metric set captured from the web UI.",
+    )
+    parser.add_argument(
+        "--metric-duration",
+        type=int,
+        default=DEFAULT_EXPORT_METRIC_DURATION,
+        help="Metric duration for exportInsight.",
+    )
+    parser.add_argument("--send-seatalk", action="store_true", help="Send the generated report to SeaTalk.")
+    parser.add_argument("--seatalk-group-id", help="Override SeaTalk target group id.")
+    parser.add_argument("--seatalk-employee-code", help="Override SeaTalk target employee code.")
+    parser.add_argument("--seatalk-title", default="Datasocial Report", help="SeaTalk message title.")
+    parser.add_argument("--save-raw", type=Path, help="Optional path to save raw API JSON.")
+    parser.add_argument("--save-export", type=Path, help="Optional path to save exported CSV bytes.")
+    parser.add_argument("--load-export", type=Path, help="Load a previously saved export CSV for analyze-only mode.")
+    parser.add_argument("--save-report", type=Path, help="Optional path to save report JSON.")
+    return parser
+
+
+def main() -> int:
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.preset:
+        try:
+            preset = load_preset(args.preset)
+        except FileNotFoundError as exc:
+            parser.exit(status=1, message=f"datasocial error: {exc}\n")
+        apply_preset_defaults(args, preset)
+
+    settings = Settings.from_env()
+    if args.endpoint:
+        settings.endpoint = args.endpoint
+    if args.usession:
+        settings.usession = args.usession
+    if args.app_slug:
+        settings.app_slug = args.app_slug
+    if args.app_id != DEFAULT_APP_ID:
+        settings.app_id = args.app_id
+    if args.seatalk_group_id:
+        settings.seatalk_group_id = args.seatalk_group_id
+    if args.seatalk_employee_code:
+        settings.seatalk_employee_code = args.seatalk_employee_code
+
+    if settings.app_id <= 0 and not args.analyze_only:
+        parser.exit(status=1, message="datasocial error: appId is required.\n")
+
+    if args.fetch_only and args.analyze_only:
+        parser.exit(status=1, message="datasocial error: choose only one of --fetch-only or --analyze-only.\n")
+
+    if not args.created_at_gte or not args.created_at_lte:
+        auto_window = build_date_window(
+            args.fetch_window,
+            mode=args.report_mode,
+            timezone_name=args.report_timezone,
+        )
+        args.created_at_gte = args.created_at_gte or auto_window.start_date
+        args.created_at_lte = args.created_at_lte or auto_window.end_date
+
+    client = GraphQLClient(settings)
+
+    try:
+        if args.analyze_only:
+            if not args.load_export:
+                parser.exit(status=1, message="datasocial error: --analyze-only requires --load-export.\n")
+            export_rows = parse_export_csv(args.load_export.read_bytes())
+            report = build_export_report(
+                export_rows,
+                hashtag_filters=args.hashtags,
+                event_hashtags=args.event_hashtags,
+                report_mode=args.report_mode,
+                timezone_name=args.report_timezone,
+                fetch_window_label=args.fetch_window,
+                top_limit=args.top_limit,
+                trend_min_views=args.trend_min_views,
+            )
+            persist_and_send(args, settings, report)
+            print(render_report(report))
+            return 0
+
+        if args.use_export and (args.report or args.fetch_only):
+            export_rows = fetch_export_rows(args, settings, client, parser)
+            if args.save_export:
+                args.save_export.parent.mkdir(parents=True, exist_ok=True)
+                args.save_export.write_bytes(export_rows_to_csv_bytes(export_rows))
+            if args.fetch_only:
+                print(f"Fetched export rows: {len(export_rows)}")
+                return 0
+
+            report = build_export_report(
+                export_rows,
+                hashtag_filters=args.hashtags,
+                event_hashtags=args.event_hashtags,
+                report_mode=args.report_mode,
+                timezone_name=args.report_timezone,
+                fetch_window_label=args.fetch_window,
+                top_limit=args.top_limit,
+                trend_min_views=args.trend_min_views,
+            )
+            persist_and_send(args, settings, report)
+            print(render_report(report))
+            return 0
+
+        payload = fetch_listpost_payload(args, settings, client)
+        if args.save_raw:
+            args.save_raw.parent.mkdir(parents=True, exist_ok=True)
+            args.save_raw.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        if args.report:
+            report = build_report(
+                [normalize_post(item) for item in payload["data"]["listPost"]["results"]],
+                hashtag_filters=args.hashtags,
+                top_limit=args.top_limit,
+                event_hashtags=args.event_hashtags,
+            )
+            persist_and_send(args, settings, report)
+            print(render_report(report))
+            return 0
+
+        page = parse_list_post_response(payload)
+        print_posts(page)
+        return 0
+    except DatasocialError as exc:
+        parser.exit(status=1, message=f"datasocial error: {exc}\n")
+    except OSError as exc:
+        parser.exit(status=1, message=f"datasocial file error: {exc}\n")
+
+
+def fetch_export_rows(args: argparse.Namespace, settings: Settings, client: GraphQLClient, parser: argparse.ArgumentParser) -> list[dict[str, str]]:
+    if args.chunk_by_day and (not args.created_at_gte or not args.created_at_lte):
+        parser.exit(status=1, message="datasocial error: --chunk-by-day requires a resolved date window.\n")
+
+    if args.chunk_by_category:
+        if not args.category_ids:
+            parser.exit(status=1, message="datasocial error: --chunk-by-category requires --category-id.\n")
+        return client.export_insight_post_rows_by_category(
+            app_id=settings.app_id,
+            created_at_gte=args.created_at_gte,
+            created_at_lte=args.created_at_lte,
+            category_ids=args.category_ids,
+            platform_ids=args.platform_ids,
+            channel_ids=args.channel_ids,
+            metric_ids=args.metric_ids or DEFAULT_EXPORT_METRIC_IDS,
+            metric_duration=args.metric_duration,
+            chunk_by_day=args.chunk_by_day,
+        )
+
+    if args.chunk_by_day:
+        return client.export_insight_post_rows_by_day(
+            app_id=settings.app_id,
+            created_at_gte=args.created_at_gte,
+            created_at_lte=args.created_at_lte,
+            category_ids=args.category_ids,
+            platform_ids=args.platform_ids,
+            channel_ids=args.channel_ids,
+            metric_ids=args.metric_ids or DEFAULT_EXPORT_METRIC_IDS,
+            metric_duration=args.metric_duration,
+        )
+
+    export_bytes = client.export_insight_post_csv(
+        app_id=settings.app_id,
+        created_at_gte=args.created_at_gte,
+        created_at_lte=args.created_at_lte,
+        category_ids=args.category_ids,
+        platform_ids=args.platform_ids,
+        channel_ids=args.channel_ids,
+        metric_ids=args.metric_ids or DEFAULT_EXPORT_METRIC_IDS,
+        metric_duration=args.metric_duration,
+    )
+    return parse_export_csv(export_bytes)
+
+
+def fetch_listpost_payload(args: argparse.Namespace, settings: Settings, client: GraphQLClient) -> dict:
+    if args.all_pages or args.report:
+        raw_results = client.list_posts_all_pages(
+            app_id=settings.app_id,
+            created_at_gte=args.created_at_gte,
+            created_at_lte=args.created_at_lte,
+            category_ids=args.category_ids,
+            platform_ids=args.platform_ids,
+            channel_ids=args.channel_ids,
+            page=args.page,
+            per_page=args.per_page,
+            max_pages=args.max_pages,
+        )
+        return {"data": {"listPost": {"total": len(raw_results), "results": raw_results}}}
+    return client.list_posts(
+        app_id=settings.app_id,
+        created_at_gte=args.created_at_gte,
+        created_at_lte=args.created_at_lte,
+        category_ids=args.category_ids,
+        platform_ids=args.platform_ids,
+        channel_ids=args.channel_ids,
+        page=args.page,
+        per_page=args.per_page,
+    )
+
+
+def persist_and_send(args: argparse.Namespace, settings: Settings, report: dict) -> None:
+    if args.save_report:
+        args.save_report.parent.mkdir(parents=True, exist_ok=True)
+        args.save_report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    if args.send_seatalk:
+        seatalk_settings = SeaTalkSettings(
+            app_id=settings.seatalk_app_id,
+            app_secret=settings.seatalk_app_secret,
+            group_id=settings.seatalk_group_id,
+            employee_code=settings.seatalk_employee_code,
+        )
+        SeaTalkClient(seatalk_settings).send_text(render_seatalk_report(report, title=args.seatalk_title))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
