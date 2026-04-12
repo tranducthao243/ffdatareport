@@ -3,7 +3,7 @@ name: FFVN Daily Send (Scheduled)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 3 * * *"
+    - cron: "50 2 * * *"
 
 permissions:
   contents: read
@@ -94,7 +94,7 @@ jobs:
           lines = [
               "# FFVN Daily Send",
               "",
-              "- Scheduled target: `10:30 Asia/Ho_Chi_Minh`",
+              "- Scheduled target: `09:50 Asia/Ho_Chi_Minh`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Total views 7D: `{overview.get('totalView', 0)}`",
               f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",

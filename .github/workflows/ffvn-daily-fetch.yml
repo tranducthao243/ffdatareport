@@ -3,7 +3,7 @@ name: FFVN Daily Fetch (Scheduled)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "30 2 * * *"
+    - cron: "0 2 * * *"
 
 permissions:
   contents: read
@@ -47,7 +47,7 @@ jobs:
           {
             echo "# FFVN Daily Fetch"
             echo
-            echo "- Scheduled target: \`09:30 Asia/Ho_Chi_Minh\`"
+            echo "- Scheduled target: \`09:00 Asia/Ho_Chi_Minh\`"
             echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
           } >> "$GITHUB_STEP_SUMMARY"
 

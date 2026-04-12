@@ -119,13 +119,13 @@ Verify the report reaches the SeaTalk group.
 
 The fetch workflow currently runs at:
 
-- `02:30 UTC`
-- equivalent to `09:30` in Vietnam when offset is `UTC+7`
+- `02:00 UTC`
+- equivalent to `09:00` in Vietnam when offset is `UTC+7`
 
 The send workflow currently runs at:
 
-- `03:30 UTC`
-- equivalent to `10:30` in Vietnam when offset is `UTC+7`
+- `02:50 UTC`
+- equivalent to `09:50` in Vietnam when offset is `UTC+7`
 
 The weekly workflow currently runs at:
 
@@ -186,12 +186,12 @@ This bypasses Social Data fetch completely and verifies only:
 The production daily flow is now split into two stages:
 
 1. `FFVN Daily Fetch (Scheduled)`
-   - target time: `09:30` Vietnam time
+   - target time: `09:00` Vietnam time
    - fetches Social Data
    - stores `outputs/ffvn_daily_latest.csv` as a GitHub artifact
 
 2. `FFVN Daily Send (Scheduled)`
-   - target time: `10:30` Vietnam time
+   - target time: `09:50` Vietnam time
    - downloads the latest fetch artifact
    - runs `analyze-only`
    - sends the report to SeaTalk
