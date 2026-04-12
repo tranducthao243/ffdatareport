@@ -19,18 +19,17 @@ You now have three workflows:
 - `.github/workflows/ffvn-daily-report.yml`
   - production scheduled run
   - also supports a manual rerun from Actions
-- `.github/workflows/ffvn-weekly-report.yml`
-  - production weekly run
-  - also supports a manual rerun from Actions
 - `.github/workflows/ffvn-manual-control.yml`
   - manual control panel with form inputs
   - lets you choose:
-    - preset (`ffvn_daily`, `ffvn_weekly`)
     - send SeaTalk or not
     - fetch window (`1D`, `4D`, `7D`, `30D`)
     - report mode (`complete_previous_day`, `today_so_far`)
     - timeout
     - SeaTalk title
+- `.github/workflows/seatalk-test-ping.yml`
+  - instant SeaTalk delivery test
+  - sends a simple message without fetching Social Data
 
 The manual workflow form in the Actions tab is the intended "online control interface".
 
@@ -94,7 +93,6 @@ Run:
 
 Suggested first test:
 
-- `preset = ffvn_daily`
 - `send_seatalk = false`
 - `fetch_window = 1D`
 - `report_mode = complete_previous_day`
@@ -148,6 +146,12 @@ Operationally, treat it as a rotating secret, not a permanent API token.
 
 If you want to change the automatic daily send time, edit the cron expression in the scheduled workflow and commit the change.
 
+GitHub Actions does not support a 1-minute cron for normal scheduled workflows. In practice:
+
+- use `SeaTalk Test Ping` for immediate delivery tests
+- use the manual control workflow for real report tests
+- if you really need a scheduled test loop, the practical minimum on GitHub-hosted runners is every 5 minutes
+
 ### Manual workflow is the main operator interface
 
 Use the manual workflow when you need to:
@@ -156,6 +160,18 @@ Use the manual workflow when you need to:
 - test a smaller window
 - disable SeaTalk while validating data
 - rerun after updating secrets
+
+### Fastest way to test bot delivery
+
+Use:
+
+- `SeaTalk Test Ping`
+
+This bypasses Social Data fetch completely and verifies only:
+
+- SeaTalk app auth
+- target group routing
+- message delivery
 
 ## Recommended next hardening steps
 

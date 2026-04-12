@@ -1,0 +1,87 @@
+name: SeaTalk Test Ping
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Message title"
+        required: true
+        default: "SeaTalk Test Ping"
+        type: string
+      body:
+        description: "Message body"
+        required: true
+        default: "SeaTalk bot test from GitHub Actions."
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: seatalk-test-ping
+  cancel-in-progress: true
+
+jobs:
+  seatalk-test-ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ffvn-reporting
+    env:
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
+      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+      PING_TITLE: ${{ inputs.title }}
+      PING_BODY: ${{ inputs.body }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send SeaTalk ping
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+
+          from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
+
+          title = os.environ["PING_TITLE"]
+          body = os.environ["PING_BODY"]
+          sent_at = datetime.now(timezone.utc).astimezone().isoformat()
+          message = "\n".join(
+              [
+                  f"**{title}**",
+                  body,
+                  "",
+                  f"Sent from GitHub Actions at `{sent_at}`.",
+              ]
+          )
+
+          settings = SeaTalkSettings(
+              app_id=os.environ["SEATALK_APP_ID"],
+              app_secret=os.environ["SEATALK_APP_SECRET"],
+              group_id=os.environ["SEATALK_GROUP_ID"],
+          )
+          SeaTalkClient(settings).send_text(message)
+          print("SeaTalk ping sent successfully.")
+          PY
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# SeaTalk Test Ping"
+            echo
+            echo "- Title: \`${PING_TITLE}\`"
+            echo "- Body: \`${PING_BODY}\`"
+            echo "- Target: configured SeaTalk group secret"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -16,7 +16,6 @@
 - [datasocial/seatalk.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/seatalk.py): SeaTalk auth and delivery
 - [datasocial/cli.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/cli.py): CLI orchestration
 - [presets/ffvn_daily.json](C:/Users/admin/OneDrive/Documents/datatool/presets/ffvn_daily.json): FFVN daily preset
-- [presets/ffvn_weekly.json](C:/Users/admin/OneDrive/Documents/datatool/presets/ffvn_weekly.json): FFVN weekly preset
 
 ## Setup
 
@@ -95,8 +94,8 @@ python -m datasocial --preset ffvn_daily --fetch-window 30D --report-mode today_
 Workflow scaffold:
 
 - [.github/workflows/ffvn-daily-report.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-report.yml)
-- [.github/workflows/ffvn-weekly-report.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-weekly-report.yml)
 - [.github/workflows/ffvn-manual-control.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-manual-control.yml)
+- [.github/workflows/seatalk-test-ping.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/seatalk-test-ping.yml)
 - [docs/GITHUB_DEPLOYMENT.md](C:/Users/admin/OneDrive/Documents/datatool/docs/GITHUB_DEPLOYMENT.md)
 
 Required GitHub Secrets:
@@ -118,7 +117,7 @@ Recommended production setup:
 - `ffvn-reporting` GitHub Environment for production secrets
 - use the manual control workflow for one-off runs
 - use the scheduled daily workflow for the daily send
-- use the scheduled weekly workflow for the weekly send
+- use the SeaTalk test ping workflow when you only want to validate bot delivery quickly
 
 ## Notes
 

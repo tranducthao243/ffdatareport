@@ -3,14 +3,6 @@ name: FFVN Report Control Panel
 on:
   workflow_dispatch:
     inputs:
-      preset:
-        description: "Which report preset to run"
-        required: true
-        default: "ffvn_daily"
-        type: choice
-        options:
-          - ffvn_daily
-          - ffvn_weekly
       send_seatalk:
         description: "Send report to SeaTalk group"
         required: true
@@ -89,7 +81,7 @@ jobs:
         run: |
           args=(
             -m datasocial
-            --preset "${{ inputs.preset }}"
+            --preset ffvn_daily
             --fetch-window "${{ inputs.fetch_window }}"
             --report-mode "${{ inputs.report_mode }}"
             --seatalk-title "${{ inputs.seatalk_title }}"
@@ -123,7 +115,7 @@ jobs:
           lines = [
               "# FFVN Control Run",
               "",
-              f"- Preset: `${{ inputs.preset }}`",
+              "- Preset: `ffvn_daily`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Fetch window: `{report.get('meta', {}).get('windowLabel', '-')}`",
               f"- Report mode: `{report.get('meta', {}).get('reportMode', '-')}`",
@@ -155,6 +147,4 @@ jobs:
           path: |
             outputs/ffvn_daily_latest.csv
             outputs/ffvn_daily_latest.json
-            outputs/ffvn_weekly_latest.csv
-            outputs/ffvn_weekly_latest.json
           if-no-files-found: warn
