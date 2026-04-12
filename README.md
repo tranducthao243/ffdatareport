@@ -93,7 +93,8 @@ python -m datasocial --preset ffvn_daily --fetch-window 30D --report-mode today_
 
 Workflow scaffold:
 
-- [.github/workflows/ffvn-daily-report.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-report.yml)
+- [.github/workflows/ffvn-daily-fetch.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-fetch.yml)
+- [.github/workflows/ffvn-daily-send.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-send.yml)
 - [.github/workflows/ffvn-manual-control.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-manual-control.yml)
 - [.github/workflows/seatalk-test-ping.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/seatalk-test-ping.yml)
 - [docs/GITHUB_DEPLOYMENT.md](C:/Users/admin/OneDrive/Documents/datatool/docs/GITHUB_DEPLOYMENT.md)
@@ -116,7 +117,8 @@ Recommended production setup:
 - Actions tab as the operator interface
 - `ffvn-reporting` GitHub Environment for production secrets
 - use the manual control workflow for one-off runs
-- use the scheduled daily workflow for the daily send
+- use the scheduled fetch workflow to prepare data before 09:30 Vietnam time
+- use the scheduled send workflow to deliver the prepared report at 10:30 Vietnam time
 - use the SeaTalk test ping workflow when you only want to validate bot delivery quickly
 
 ## Notes

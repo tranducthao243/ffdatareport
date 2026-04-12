@@ -14,11 +14,14 @@ This is safer and simpler than building a custom web login in front of a tool th
 ## What the GitHub interface looks like
 
 You now have two workflows:
-You now have three workflows:
+You now have four workflows:
 
-- `.github/workflows/ffvn-daily-report.yml`
-  - production scheduled run
-  - also supports a manual rerun from Actions
+- `.github/workflows/ffvn-daily-fetch.yml`
+  - scheduled fetch-only job
+  - prepares the CSV artifact before the send window
+- `.github/workflows/ffvn-daily-send.yml`
+  - scheduled send-only job
+  - downloads the latest fetch artifact and sends the report to SeaTalk
 - `.github/workflows/ffvn-manual-control.yml`
   - manual control panel with form inputs
   - lets you choose:
@@ -114,10 +117,15 @@ Verify the report reaches the SeaTalk group.
 
 ### 7. Turn on the schedule
 
-The scheduled workflow currently runs at:
+The fetch workflow currently runs at:
 
-- `02:10 UTC`
-- equivalent to `09:10` in Vietnam when offset is `UTC+7`
+- `02:30 UTC`
+- equivalent to `09:30` in Vietnam when offset is `UTC+7`
+
+The send workflow currently runs at:
+
+- `03:30 UTC`
+- equivalent to `10:30` in Vietnam when offset is `UTC+7`
 
 The weekly workflow currently runs at:
 
@@ -144,7 +152,7 @@ Operationally, treat it as a rotating secret, not a permanent API token.
 
 ### GitHub schedule is fixed in workflow YAML
 
-If you want to change the automatic daily send time, edit the cron expression in the scheduled workflow and commit the change.
+If you want to change the automatic timings, edit the cron expressions in the fetch/send workflows and commit the change.
 
 GitHub Actions does not support a 1-minute cron for normal scheduled workflows. In practice:
 
@@ -172,6 +180,23 @@ This bypasses Social Data fetch completely and verifies only:
 - SeaTalk app auth
 - target group routing
 - message delivery
+
+### Production timing model
+
+The production daily flow is now split into two stages:
+
+1. `FFVN Daily Fetch (Scheduled)`
+   - target time: `09:30` Vietnam time
+   - fetches Social Data
+   - stores `outputs/ffvn_daily_latest.csv` as a GitHub artifact
+
+2. `FFVN Daily Send (Scheduled)`
+   - target time: `10:30` Vietnam time
+   - downloads the latest fetch artifact
+   - runs `analyze-only`
+   - sends the report to SeaTalk
+
+This avoids delayed sends when the Social Data fetch takes several minutes.
 
 ## Recommended next hardening steps
 

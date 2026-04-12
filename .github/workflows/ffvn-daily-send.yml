@@ -1,0 +1,111 @@
+name: FFVN Daily Send (Scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 3 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ffvn-daily-send
+  cancel-in-progress: false
+
+jobs:
+  ffvn-daily-send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ffvn-reporting
+    env:
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
+      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      ARTIFACT_NAME: ffvn-daily-fetch-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download latest fetch artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          artifact_id="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/artifacts?per_page=100" \
+              --jq '.artifacts[] | select(.name == env.ARTIFACT_NAME and .expired == false) | .id' \
+            | head -n 1
+          )"
+
+          if [[ -z "${artifact_id}" ]]; then
+            echo "No matching fetch artifact found."
+            exit 1
+          fi
+
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/artifacts/${artifact_id}/zip" > fetch_artifact.zip
+
+          mkdir -p outputs
+          python - <<'PY'
+          import zipfile
+
+          with zipfile.ZipFile("fetch_artifact.zip", "r") as zf:
+              zf.extractall("outputs")
+          PY
+
+      - name: Build and send report from fetched CSV
+        run: |
+          python -m datasocial \
+            --preset ffvn_daily \
+            --analyze-only \
+            --load-export outputs/ffvn_daily_latest.csv \
+            --send-seatalk
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path("outputs/ffvn_daily_latest.json")
+          summary_path = Path("${GITHUB_STEP_SUMMARY}")
+          if not path.exists():
+              summary_path.write_text("FFVN daily send did not produce a JSON artifact.\n", encoding="utf-8")
+              raise SystemExit(0)
+
+          report = json.loads(path.read_text(encoding="utf-8"))
+          overview = report.get("modules", {}).get("overview7D", {})
+          lines = [
+              "# FFVN Daily Send",
+              "",
+              "- Scheduled target: `10:30 Asia/Ho_Chi_Minh`",
+              f"- Generated: `{report.get('generatedAt', '-')}`",
+              f"- Total views 7D: `{overview.get('totalView', 0)}`",
+              f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
+          ]
+          summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+
+      - name: Upload send artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffvn-daily-send-latest
+          path: outputs/ffvn_daily_latest.json
+          if-no-files-found: warn

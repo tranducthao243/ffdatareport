@@ -1,0 +1,60 @@
+name: FFVN Daily Fetch (Scheduled)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 2 * * *"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ffvn-daily-fetch
+  cancel-in-progress: false
+
+jobs:
+  ffvn-daily-fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ffvn-reporting
+    env:
+      DATASOCIAL_GRAPHQL_ENDPOINT: https://socialdata.garena.vn/graphql
+      DATASOCIAL_ORIGIN: https://socialdata.garena.vn
+      DATASOCIAL_APP_ID: 2
+      DATASOCIAL_APP_SLUG: ffvn
+      DATASOCIAL_TIMEOUT: 300
+      DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FFVN daily fetch
+        run: python -m datasocial --preset ffvn_daily --fetch-only
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# FFVN Daily Fetch"
+            echo
+            echo "- Scheduled target: \`09:30 Asia/Ho_Chi_Minh\`"
+            echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload fetch artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffvn-daily-fetch-latest
+          path: outputs/ffvn_daily_latest.csv
+          if-no-files-found: warn
