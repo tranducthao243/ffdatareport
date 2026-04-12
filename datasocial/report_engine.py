@@ -99,7 +99,7 @@ def build_modular_export_report(
                 min_views=trend_min_views,
             ),
             "dailyViews7D": build_daily_view_series(overview_records_7d, analytics_window),
-            "dailyPostCount7D": build_daily_post_series(filtered_records, analytics_window),
+            "dailyPostCount7D": build_daily_post_series(overview_records_7d, analytics_window),
             "topKols7D": build_top_kols(filtered_records, analytics_window, top_limit=top_limit),
             "overview7D": build_overview_summary(overview_records_7d),
             "campaignTracking": {
