@@ -42,18 +42,40 @@ jobs:
         run: |
           set -euo pipefail
 
-          artifact_id="$(
-            gh api \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${REPO}/actions/artifacts?per_page=100" \
-              --jq '.artifacts[] | select(.name == env.ARTIFACT_NAME and .expired == false) | .id' \
-            | head -n 1
-          )"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
 
-          if [[ -z "${artifact_id}" ]]; then
-            echo "No matching fetch artifact found."
-            exit 1
-          fi
+          python - <<'PY'
+          import json
+          from datetime import datetime, timedelta, timezone
+          from pathlib import Path
+
+          artifacts = json.loads(Path("artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
+          cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+          target_name = "ffvn-daily-fetch-latest"
+
+          candidates = []
+          for artifact in artifacts:
+              if artifact.get("name") != target_name or artifact.get("expired"):
+                  continue
+              created_at = artifact.get("created_at")
+              if not created_at:
+                  continue
+              created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+              if created_dt >= cutoff:
+                  candidates.append((created_dt, artifact["id"]))
+
+          if not candidates:
+              raise SystemExit(
+                  "No recent fetch artifact found in the last 12 hours. Run FFVN Daily Fetch (Scheduled) first."
+              )
+
+          candidates.sort(reverse=True)
+          Path("artifact_id.txt").write_text(str(candidates[0][1]), encoding="utf-8")
+          PY
+
+          artifact_id="$(cat artifact_id.txt)"
 
           gh api \
             -H "Accept: application/vnd.github+json" \
