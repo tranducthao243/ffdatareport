@@ -1,362 +1,364 @@
-# Actions Operator Guide
+# Hướng Dẫn Vận Hành GitHub Actions
 
-This guide is for day-to-day operators of the GitHub version of `datasocial`.
+Tài liệu này dành cho người vận hành tool `datasocial` trên GitHub.
 
-It explains:
+Mục tiêu của tài liệu:
 
-- what each workflow does
-- when to run which workflow
-- where to change schedules
-- where to update secrets
-- how to troubleshoot common failures
+- giải thích từng workflow dùng để làm gì
+- khi nào dùng workflow nào
+- chỗ nào để sửa giờ chạy
+- chỗ nào để cập nhật secrets
+- cách xử lý các lỗi thường gặp
 
-## 1. What this tool does
+## 1. Tool này đang làm gì
 
-The tool automates FFVN reporting from the private Social Data system.
+Tool này tự động tạo báo cáo FFVN từ hệ thống Social Data private của công ty.
 
-Production flow:
+Flow production hiện tại:
 
-1. fetch data from Social Data
-2. save the fetched CSV as a GitHub artifact
-3. build the report from that saved CSV
-4. send the report to SeaTalk
+1. lấy dữ liệu từ Social Data
+2. lưu file CSV đã fetch thành artifact trên GitHub
+3. build report từ file CSV đó
+4. gửi report sang SeaTalk
 
-The production flow is intentionally split into two scheduled workflows:
+Flow production được tách thành hai workflow riêng:
 
-- fetch first
-- send later
+- fetch trước
+- send sau
 
-This prevents delayed SeaTalk sends when Social Data fetches take a long time.
+Mục đích là để nếu bước fetch lâu thì vẫn không làm lệch giờ gửi SeaTalk.
 
-## 2. Main workflows in GitHub Actions
+## 2. Các workflow chính trên GitHub Actions
 
 ### `FFVN Daily Fetch (Scheduled)`
 
-Purpose:
+Mục đích:
 
-- fetch Social Data before the send window
-- save the CSV artifact
+- lấy dữ liệu từ Social Data trước giờ gửi
+- lưu artifact CSV
 
-Current target time:
+Giờ chạy hiện tại:
 
-- `09:00` Asia/Ho_Chi_Minh
+- `09:00` giờ Việt Nam
 
-What it produces:
+Output chính:
 
 - `outputs/ffvn_daily_latest.csv`
-- uploaded to GitHub as an artifact
+- file này được upload thành artifact trên GitHub
 
 ### `FFVN Daily Send (Scheduled)`
 
-Purpose:
+Mục đích:
 
-- download the latest fetch artifact
-- analyze it
-- send the report to SeaTalk
+- tải artifact fetch mới nhất
+- phân tích dữ liệu
+- gửi report sang SeaTalk
 
-Current target time:
+Giờ chạy hiện tại:
 
-- `09:50` Asia/Ho_Chi_Minh
+- `09:50` giờ Việt Nam
 
-What it produces:
+Output chính:
 
 - `outputs/ffvn_daily_latest.json`
-- sends the final message to the configured SeaTalk group
+- gửi tin nhắn report vào group SeaTalk đã cấu hình
 
 ### `FFVN Report Control Panel`
 
-Purpose:
+Mục đích:
 
-- manual one-off run
-- useful for testing
-- can run with or without SeaTalk delivery
+- chạy tay khi cần
+- dùng để test
+- có thể chạy có hoặc không gửi SeaTalk
 
-Use this when:
+Dùng workflow này khi:
 
-- you want to test a smaller window
-- you want to rerun manually
-- you want to validate a config change
+- muốn test nhanh
+- muốn chạy lại thủ công
+- muốn thử cửa sổ nhỏ như `1D`
+- muốn xác nhận thay đổi trước khi để auto chạy
 
 ### `SeaTalk Test Ping`
 
-Purpose:
+Mục đích:
 
-- test only the SeaTalk bot delivery
-- does **not** fetch Social Data
+- test riêng bot SeaTalk
+- không gọi Social Data
 
-Use this when:
+Dùng workflow này khi:
 
-- you only want to verify bot credentials and group delivery
-- you do not want to wait for Social Data fetch
+- chỉ muốn kiểm tra bot có gửi vào group được không
+- không muốn chờ bước fetch data
 
-## 3. Which workflow should I use?
+## 3. Khi nào nên dùng workflow nào
 
-### Daily production
+### Chạy production hằng ngày
 
-Use:
+Để GitHub tự chạy:
 
 - `FFVN Daily Fetch (Scheduled)`
 - `FFVN Daily Send (Scheduled)`
 
-Do not run both manually every day. GitHub schedule handles that automatically.
+Không cần bấm tay mỗi ngày.
 
-### Quick bot test
+### Test bot SeaTalk nhanh nhất
 
-Use:
+Dùng:
 
 - `SeaTalk Test Ping`
 
-### Manual report test
+### Test report bằng tay
 
-Use:
+Dùng:
 
 - `FFVN Report Control Panel`
 
-Suggested test settings:
+Thiết lập test gợi ý:
 
 - `send_seatalk = false`
 - `fetch_window = 1D`
 - `report_mode = complete_previous_day`
 
-Then, when that works:
+Khi bước này ổn, có thể chạy lại với:
 
-- rerun with `send_seatalk = true`
+- `send_seatalk = true`
 
-## 4. How the production schedule works
+## 4. Lịch production đang chạy thế nào
 
-Current daily production timing:
+Lịch production hiện tại:
 
-- `09:00` Vietnam time: fetch data
-- `09:50` Vietnam time: send report
+- `09:00` giờ Việt Nam: fetch dữ liệu
+- `09:50` giờ Việt Nam: gửi report
 
-Why split it:
+Vì sao tách làm 2 workflow:
 
-- Social Data fetch can take many minutes
-- SeaTalk delivery should still happen at a predictable time
+- fetch từ Social Data có thể mất nhiều phút
+- report vẫn cần gửi vào một khung giờ cố định
 
-## 5. Where to change schedules
+## 5. Chỗ sửa giờ chạy
 
-### Fetch schedule
+### Sửa giờ fetch
 
 File:
 
 - `.github/workflows/ffvn-daily-fetch.yml`
 
-Current cron:
+Cron hiện tại:
 
 - `0 2 * * *`
 
-Meaning:
+Ý nghĩa:
 
 - `02:00 UTC`
-- `09:00` Vietnam time
+- `09:00` giờ Việt Nam
 
-### Send schedule
+### Sửa giờ send
 
 File:
 
 - `.github/workflows/ffvn-daily-send.yml`
 
-Current cron:
+Cron hiện tại:
 
 - `50 2 * * *`
 
-Meaning:
+Ý nghĩa:
 
 - `02:50 UTC`
-- `09:50` Vietnam time
+- `09:50` giờ Việt Nam
 
-If you want to change the automatic time:
+Nếu muốn đổi giờ tự động:
 
-1. edit the cron in the workflow file
-2. commit the change
-3. push to `main`
+1. sửa cron trong file workflow
+2. commit
+3. push lên `main`
 
-## 6. Where to change report behavior
+## 6. Chỗ sửa logic report
 
-### Preset defaults
+### Preset mặc định
 
 File:
 
 - `presets/ffvn_daily.json`
 
-Use this file to change:
+Dùng file này để đổi:
 
-- tracked categories
-- tracked platforms
-- hashtag filters
-- event hashtags
-- top limits
-- trend minimum views
-- default SeaTalk title
+- category cần track
+- platform cần track
+- hashtag filter
+- event hashtag
+- top limit
+- minimum views của trend video
+- title mặc định khi gửi SeaTalk
 
-### Report wording and message formatting
+### Text và cách hiển thị report
 
-Files:
+Các file chính:
 
 - `datasocial/formatter.py`
 - `datasocial/report_engine.py`
 
-Use these files to change:
+Dùng để sửa:
 
-- report section titles
-- SeaTalk wording
-- compact formatting
-- ranking block display
-- overall report structure
+- tên các section
+- wording khi gửi SeaTalk
+- cách hiển thị gọn hay dài
+- thứ tự các block trong report
 
-## 7. Where to update secrets
+## 7. Chỗ sửa secrets
 
-GitHub path:
+Trên GitHub:
 
 - `Settings -> Environments -> ffvn-reporting`
 
-Required secrets:
+Secrets bắt buộc:
 
 - `DATASOCIAL_USESSION`
 - `SEATALK_APP_ID`
 - `SEATALK_APP_SECRET`
 - `SEATALK_GROUP_ID`
 
-## 8. How to refresh `DATASOCIAL_USESSION`
+## 8. Cách refresh `DATASOCIAL_USESSION`
 
-`DATASOCIAL_USESSION` comes from the Social Data website session cookie.
+`DATASOCIAL_USESSION` là cookie session lấy từ website Social Data.
 
-Get it from the browser:
+Cách lấy:
 
-1. open `socialdata.garena.vn`
-2. log in with the working account
-3. open browser devtools
-4. go to cookies or a GraphQL request
-5. copy the current `usession` value
-6. replace the GitHub Environment secret `DATASOCIAL_USESSION`
+1. mở `socialdata.garena.vn`
+2. đăng nhập bằng tài khoản đang có quyền
+3. mở DevTools của trình duyệt
+4. vào phần Cookies hoặc chọn một request GraphQL
+5. copy giá trị `usession`
+6. cập nhật lại GitHub Environment secret `DATASOCIAL_USESSION`
 
-If this cookie expires, scheduled fetches will fail.
+Nếu cookie này hết hạn thì workflow fetch sẽ fail.
 
-## 9. How to read artifacts
+## 9. Cách đọc artifacts
 
-After a workflow run succeeds:
+Sau khi workflow chạy xong:
 
-1. open the workflow run page
-2. scroll to the `Artifacts` section
-3. download the artifact zip
-4. extract it locally
+1. mở workflow run
+2. kéo xuống phần `Artifacts`
+3. tải file zip về
+4. giải nén trên máy
 
-Common outputs:
+Các file phổ biến:
 
 - fetch workflow:
   - `ffvn_daily_latest.csv`
 - send/analyze workflow:
   - `ffvn_daily_latest.json`
 
-## 10. How to troubleshoot
+## 10. Cách xử lý lỗi thường gặp
 
-### Case A: fetch workflow runs for a long time
+### Trường hợp A: fetch chạy lâu
 
-This usually means Social Data is slow.
+Nguyên nhân thường là Social Data phản hồi chậm.
 
-Check:
+Chỗ cần xem:
 
-- the `Run FFVN daily fetch` step log
+- step `Run FFVN daily fetch`
 
-Remember:
+Lưu ý:
 
-- fetch workflow has a hard timeout
-- it will not run forever
+- workflow có timeout
+- nó không chạy mãi mãi
 
-### Case B: fetch workflow fails with timeout
+### Trường hợp B: fetch bị timeout
 
-Common error:
+Ví dụ lỗi:
 
 - `Read timed out`
 
-Possible fixes:
+Cách xử lý:
 
-- increase timeout
-- reduce fetch window in manual tests
-- refresh `DATASOCIAL_USESSION`
+- tăng timeout
+- test với `fetch_window = 1D`
+- refresh lại `DATASOCIAL_USESSION`
 
-### Case C: send workflow fails before SeaTalk
+### Trường hợp C: send workflow fail trước khi gửi SeaTalk
 
-Possible cause:
+Khả năng:
 
-- fetch artifact was not available
+- không tìm thấy fetch artifact
 
-Fix:
+Cách xử lý:
 
-- verify the fetch workflow succeeded earlier that day
-- rerun fetch manually
-- rerun send after fetch succeeds
+- kiểm tra fetch workflow trước đó có chạy thành công không
+- nếu cần thì chạy tay fetch trước
+- rồi chạy lại send
 
-### Case D: SeaTalk send fails
+### Trường hợp D: SeaTalk gửi lỗi
 
-Possible causes:
+Khả năng:
 
-- wrong `SEATALK_APP_ID`
-- wrong `SEATALK_APP_SECRET`
-- wrong `SEATALK_GROUP_ID`
-- bot removed from target group
+- sai `SEATALK_APP_ID`
+- sai `SEATALK_APP_SECRET`
+- sai `SEATALK_GROUP_ID`
+- bot đã bị remove khỏi group
 
-Best first test:
+Cách test nhanh nhất:
 
-- run `SeaTalk Test Ping`
+- chạy `SeaTalk Test Ping`
 
-### Case E: report wording needs to change
+### Trường hợp E: muốn sửa text report
 
-Edit:
+Sửa:
 
 - `datasocial/formatter.py`
 
-Then:
+Sau đó:
 
 1. commit
 2. push
-3. run `FFVN Report Control Panel`
+3. chạy `FFVN Report Control Panel` để test lại
 
-## 11. What is safe to change vs what is not
+## 11. Cái gì nên sửa, cái gì không nên sửa lung tung
 
-Safe for most operators:
+Thường có thể sửa an toàn:
 
-- rerun a workflow
-- use the control panel with smaller windows
+- rerun workflow
+- test bằng control panel với cửa sổ nhỏ
 - update secrets
-- run SeaTalk ping
+- chạy SeaTalk ping
 
-Only edit with care:
+Cần cẩn thận khi sửa:
 
-- workflow cron schedules
-- preset category/platform filters
-- report engine logic
+- cron schedule
+- preset category/platform
+- logic report engine
 
-## 12. Recommended routine
+## 12. Quy trình vận hành gợi ý
 
-### Normal daily operation
+### Vận hành bình thường
 
-Do nothing.
+Không cần làm gì.
 
-GitHub should:
+GitHub sẽ tự:
 
-- fetch at `09:00`
-- send at `09:50`
+- fetch lúc `09:00`
+- send lúc `09:50`
 
-### If something looks wrong
+### Khi thấy có vấn đề
 
-1. check `FFVN Daily Fetch (Scheduled)`
-2. check `FFVN Daily Send (Scheduled)`
-3. run `SeaTalk Test Ping`
-4. if needed, run `FFVN Report Control Panel`
+Làm theo thứ tự:
 
-## 13. Important limitation
+1. kiểm tra `FFVN Daily Fetch (Scheduled)`
+2. kiểm tra `FFVN Daily Send (Scheduled)`
+3. chạy `SeaTalk Test Ping`
+4. nếu cần thì chạy `FFVN Report Control Panel`
 
-This tool still depends on:
+## 13. Giới hạn hiện tại của tool
 
-- a valid Social Data browser session cookie
+Tool này hiện vẫn phụ thuộc vào:
 
-It is not yet using a permanent service account or official API token.
+- cookie session browser của Social Data
 
-That means:
+Nó chưa dùng service account cố định hay API token chính thức.
 
-- if `DATASOCIAL_USESSION` expires
-- or the account loses access
+Điều đó có nghĩa là:
 
-the fetch workflow will fail until the secret is refreshed.
+- nếu `DATASOCIAL_USESSION` hết hạn
+- hoặc tài khoản mất quyền
+
+thì workflow fetch sẽ fail cho đến khi bạn cập nhật secret mới.
