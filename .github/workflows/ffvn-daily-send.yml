@@ -2,8 +2,11 @@ name: FFVN Daily Send (Scheduled)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "50 2 * * *"
+  workflow_run:
+    workflows:
+      - FFVN Daily Fetch (Scheduled)
+    types:
+      - completed
 
 permissions:
   contents: read
@@ -15,8 +18,9 @@ concurrency:
 
 jobs:
   ffvn-daily-send:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     environment: ffvn-reporting
     env:
       SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
@@ -25,26 +29,112 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      SEND_TARGET_HOUR: "9"
+      SEND_TARGET_MINUTE: "50"
+      SEND_LATEST_HOUR: "12"
     steps:
+      - name: Gate send time window
+        id: gate_send
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "reason=manual-dispatch" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          gate_json="$(python - <<'PY'
+          import json
+          import os
+          import time
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          tz = ZoneInfo("Asia/Ho_Chi_Minh")
+          now = datetime.now(tz)
+          target = now.replace(
+              hour=int(os.environ["SEND_TARGET_HOUR"]),
+              minute=int(os.environ["SEND_TARGET_MINUTE"]),
+              second=0,
+              microsecond=0,
+          )
+          latest = now.replace(
+              hour=int(os.environ["SEND_LATEST_HOUR"]),
+              minute=0,
+              second=0,
+              microsecond=0,
+          )
+
+          reason = "inside-window"
+          should_run = True
+          wait_seconds = 0
+
+          if now < target:
+              wait_seconds = int((target - now).total_seconds())
+              reason = "wait-until-target"
+          elif now > latest:
+              should_run = False
+              reason = "outside-window-too-late"
+
+          if wait_seconds > 0:
+              time.sleep(wait_seconds)
+              now = datetime.now(tz)
+
+          print(
+              json.dumps(
+                  {
+                      "should_run": should_run,
+                      "reason": reason,
+                      "wait_seconds": wait_seconds,
+                      "now_local": now.isoformat(),
+                      "target_local": target.isoformat(),
+                      "latest_local": latest.isoformat(),
+                  }
+              )
+          )
+          PY
+          )"
+
+          should_run="$(python -c "import json,sys; print('true' if json.loads(sys.argv[1])['should_run'] else 'false')" "$gate_json")"
+          reason="$(python -c "import json,sys; print(json.loads(sys.argv[1])['reason'])" "$gate_json")"
+          wait_seconds="$(python -c "import json,sys; print(json.loads(sys.argv[1])['wait_seconds'])" "$gate_json")"
+          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
+          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
+          echo "wait_seconds=${wait_seconds}" >> "$GITHUB_OUTPUT"
+          echo "gate_json=${gate_json}" >> "$GITHUB_OUTPUT"
+
       - name: Checkout
+        if: steps.gate_send.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
+        if: steps.gate_send.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: steps.gate_send.outputs.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Download latest fetch artifact
+        if: steps.gate_send.outputs.should_run == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
+          if [[ -n "${SOURCE_RUN_ID}" ]]; then
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > artifacts.json
+          else
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
+          fi
 
           python - <<'PY'
           import json
@@ -90,6 +180,7 @@ jobs:
           PY
 
       - name: Build and send report from fetched CSV
+        if: steps.gate_send.outputs.should_run == 'true'
         run: |
           python -m datasocial \
             --preset ffvn_daily \
@@ -136,6 +227,10 @@ jobs:
               "",
               "- Scheduled target: `09:50 Asia/Ho_Chi_Minh`",
               f"- Event: `{event_name}`",
+              f"- Trigger source run id: `{os.environ.get('SOURCE_RUN_ID', '') or '-'}`",
+              "- Gate should_run: `${{ steps.gate_send.outputs.should_run }}`",
+              "- Gate reason: `${{ steps.gate_send.outputs.reason }}`",
+              "- Gate wait_seconds: `${{ steps.gate_send.outputs.wait_seconds }}`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Total views 7D: `{overview.get('totalView', 0)}`",
               f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
@@ -147,7 +242,7 @@ jobs:
           PY
 
       - name: Upload send artifact
-        if: always()
+        if: always() && steps.gate_send.outputs.should_run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-send-latest
