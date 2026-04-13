@@ -95,7 +95,10 @@ jobs:
             --preset ffvn_daily \
             --analyze-only \
             --load-export outputs/ffvn_daily_latest.csv \
-            --send-seatalk
+            --send-seatalk \
+            --debug \
+            --log-file outputs/ffvn_daily_send.log \
+            --status-file outputs/ffvn_daily_send_status.json
 
       - name: Build job summary
         if: always()
@@ -103,12 +106,27 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           path = Path("outputs/ffvn_daily_latest.json")
+          status_path = Path("outputs/ffvn_daily_send_status.json")
           summary_path = Path("${GITHUB_STEP_SUMMARY}")
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "-")
+          status_data = {}
+          if status_path.exists():
+              status_data = json.loads(status_path.read_text(encoding="utf-8"))
           if not path.exists():
-              summary_path.write_text("FFVN daily send did not produce a JSON artifact.\n", encoding="utf-8")
+              lines = [
+                  "# FFVN Daily Send",
+                  "",
+                  "FFVN daily send did not produce a JSON artifact.",
+                  f"- Event: `{event_name}`",
+                  f"- Status phase: `{status_data.get('phase', '-')}`",
+                  f"- Status updated_at_utc: `{status_data.get('updated_at_utc', '-')}`",
+                  f"- Error: `{status_data.get('error', '-')}`",
+              ]
+              summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
               raise SystemExit(0)
 
           report = json.loads(path.read_text(encoding="utf-8"))
@@ -117,9 +135,13 @@ jobs:
               "# FFVN Daily Send",
               "",
               "- Scheduled target: `09:50 Asia/Ho_Chi_Minh`",
+              f"- Event: `{event_name}`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Total views 7D: `{overview.get('totalView', 0)}`",
               f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
+              f"- Status phase: `{status_data.get('phase', '-')}`",
+              f"- Status updated_at_utc: `{status_data.get('updated_at_utc', '-')}`",
+              f"- Error: `{status_data.get('error', '-')}`",
           ]
           summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
@@ -129,5 +151,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-send-latest
-          path: outputs/ffvn_daily_latest.json
+          path: |
+            outputs/ffvn_daily_latest.json
+            outputs/ffvn_daily_send.log
+            outputs/ffvn_daily_send_status.json
           if-no-files-found: warn

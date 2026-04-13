@@ -3,7 +3,7 @@ name: FFVN Daily Fetch (Scheduled)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "*/5 * * * *"
 
 permissions:
   contents: read
@@ -38,17 +38,32 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run FFVN daily fetch
-        run: python -m datasocial --preset ffvn_daily --fetch-only
+        run: |
+          python -m datasocial \
+            --preset ffvn_daily \
+            --fetch-only \
+            --debug \
+            --log-file outputs/ffvn_daily_fetch.log \
+            --status-file outputs/ffvn_daily_fetch_status.json
 
       - name: Build job summary
         if: always()
         shell: bash
         run: |
+          status_phase="missing"
+          status_updated="-"
+          if [[ -f outputs/ffvn_daily_fetch_status.json ]]; then
+            status_phase="$(python -c "import json;print(json.load(open('outputs/ffvn_daily_fetch_status.json',encoding='utf-8')).get('phase','-'))")"
+            status_updated="$(python -c "import json;print(json.load(open('outputs/ffvn_daily_fetch_status.json',encoding='utf-8')).get('updated_at_utc','-'))")"
+          fi
           {
             echo "# FFVN Daily Fetch"
             echo
             echo "- Scheduled target: \`09:00 Asia/Ho_Chi_Minh\`"
             echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
+            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Status phase: \`${status_phase}\`"
+            echo "- Status updated_at_utc: \`${status_updated}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload fetch artifact
@@ -56,5 +71,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-fetch-latest
-          path: outputs/ffvn_daily_latest.csv
+          path: |
+            outputs/ffvn_daily_latest.csv
+            outputs/ffvn_daily_fetch.log
+            outputs/ffvn_daily_fetch_status.json
           if-no-files-found: warn

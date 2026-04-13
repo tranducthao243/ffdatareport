@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
+import logging
+import os
 from pathlib import Path
 import sys
 
@@ -22,6 +25,9 @@ from .parser import normalize_post, parse_list_post_response
 from .presets import apply_preset_defaults, load_preset
 from .seatalk import SeaTalkClient, SeaTalkSettings
 from .timewindows import DEFAULT_REPORT_TZ, build_date_window
+
+
+LOGGER = logging.getLogger("datasocial")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -124,7 +130,44 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-export", type=Path, help="Optional path to save exported CSV bytes.")
     parser.add_argument("--load-export", type=Path, help="Load a previously saved export CSV for analyze-only mode.")
     parser.add_argument("--save-report", type=Path, help="Optional path to save report JSON.")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging.")
+    parser.add_argument("--log-file", type=Path, help="Optional path to write runtime logs.")
+    parser.add_argument("--status-file", type=Path, help="Optional path to write runtime status JSON.")
     return parser
+
+
+def configure_logging(debug: bool, log_file: Path | None) -> None:
+    level = logging.DEBUG if debug else logging.INFO
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()
+    root_logger.setLevel(level)
+
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(level)
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+
+    if log_file:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, encoding="utf-8")
+        file_handler.setLevel(level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+
+def write_status(status_file: Path | None, status: dict) -> None:
+    if not status_file:
+        return
+    status_file.parent.mkdir(parents=True, exist_ok=True)
+    status_file.write_text(json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def update_status(status: dict, phase: str, **fields: object) -> None:
+    status["phase"] = phase
+    status["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    for key, value in fields.items():
+        status[key] = value
 
 
 def main() -> int:
@@ -136,6 +179,21 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
+    configure_logging(args.debug, args.log_file)
+
+    status: dict[str, object] = {
+        "phase": "init",
+        "started_at_utc": datetime.now(timezone.utc).isoformat(),
+        "event_name": os.getenv("GITHUB_EVENT_NAME", ""),
+        "run_id": os.getenv("GITHUB_RUN_ID", ""),
+        "run_number": os.getenv("GITHUB_RUN_NUMBER", ""),
+        "job": os.getenv("GITHUB_JOB", ""),
+        "send_seatalk": bool(args.send_seatalk),
+        "analyze_only": bool(args.analyze_only),
+        "fetch_only": bool(args.fetch_only),
+        "use_export": bool(args.use_export),
+    }
+    write_status(args.status_file, status)
 
     if args.preset:
         try:
@@ -176,9 +234,30 @@ def main() -> int:
     client = GraphQLClient(settings)
 
     try:
+        update_status(
+            status,
+            "window_resolved",
+            created_at_gte=args.created_at_gte,
+            created_at_lte=args.created_at_lte,
+            report_timezone=args.report_timezone,
+            fetch_window=args.fetch_window,
+            report_mode=args.report_mode,
+        )
+        write_status(args.status_file, status)
+        LOGGER.info(
+            "Resolved window: %s -> %s (%s, mode=%s)",
+            args.created_at_gte,
+            args.created_at_lte,
+            args.report_timezone,
+            args.report_mode,
+        )
+
         if args.analyze_only:
             if not args.load_export:
                 parser.exit(status=1, message="datasocial error: --analyze-only requires --load-export.\n")
+            update_status(status, "analyze_only_load_export", load_export=str(args.load_export))
+            write_status(args.status_file, status)
+            LOGGER.info("Analyze-only mode with export file: %s", args.load_export)
             export_rows = parse_export_csv(args.load_export.read_bytes())
             report = build_export_report(
                 export_rows,
@@ -190,16 +269,31 @@ def main() -> int:
                 top_limit=args.top_limit,
                 trend_min_views=args.trend_min_views,
             )
+            update_status(status, "analyze_only_report_ready", export_rows=len(export_rows))
+            write_status(args.status_file, status)
+            if args.send_seatalk:
+                update_status(status, "seatalk_sending")
+                write_status(args.status_file, status)
             persist_and_send(args, settings, report)
+            update_status(status, "completed", exit_code=0)
+            write_status(args.status_file, status)
             print(render_report(report))
             return 0
 
         if args.use_export and (args.report or args.fetch_only):
+            update_status(status, "fetch_export_rows")
+            write_status(args.status_file, status)
             export_rows = fetch_export_rows(args, settings, client, parser)
+            update_status(status, "export_rows_ready", export_rows=len(export_rows))
+            write_status(args.status_file, status)
+            LOGGER.info("Fetched export rows: %s", len(export_rows))
             if args.save_export:
                 args.save_export.parent.mkdir(parents=True, exist_ok=True)
                 args.save_export.write_bytes(export_rows_to_csv_bytes(export_rows))
+                LOGGER.info("Saved export CSV to %s", args.save_export)
             if args.fetch_only:
+                update_status(status, "completed", exit_code=0)
+                write_status(args.status_file, status)
                 print(f"Fetched export rows: {len(export_rows)}")
                 return 0
 
@@ -213,14 +307,26 @@ def main() -> int:
                 top_limit=args.top_limit,
                 trend_min_views=args.trend_min_views,
             )
+            if args.send_seatalk:
+                update_status(status, "seatalk_sending")
+                write_status(args.status_file, status)
             persist_and_send(args, settings, report)
+            update_status(status, "completed", exit_code=0)
+            write_status(args.status_file, status)
             print(render_report(report))
             return 0
 
+        update_status(status, "fetch_listpost_payload")
+        write_status(args.status_file, status)
         payload = fetch_listpost_payload(args, settings, client)
+        post_total = payload.get("data", {}).get("listPost", {}).get("total")
+        update_status(status, "listpost_ready", listpost_total=post_total)
+        write_status(args.status_file, status)
+        LOGGER.info("Fetched listPost payload. total=%s", post_total)
         if args.save_raw:
             args.save_raw.parent.mkdir(parents=True, exist_ok=True)
             args.save_raw.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            LOGGER.info("Saved raw payload to %s", args.save_raw)
 
         if args.report:
             report = build_report(
@@ -229,17 +335,35 @@ def main() -> int:
                 top_limit=args.top_limit,
                 event_hashtags=args.event_hashtags,
             )
+            if args.send_seatalk:
+                update_status(status, "seatalk_sending")
+                write_status(args.status_file, status)
             persist_and_send(args, settings, report)
+            update_status(status, "completed", exit_code=0)
+            write_status(args.status_file, status)
             print(render_report(report))
             return 0
 
         page = parse_list_post_response(payload)
+        update_status(status, "completed", exit_code=0, parsed_posts=len(page.results))
+        write_status(args.status_file, status)
         print_posts(page)
         return 0
     except DatasocialError as exc:
+        update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
+        write_status(args.status_file, status)
+        LOGGER.exception("DatasocialError")
         parser.exit(status=1, message=f"datasocial error: {exc}\n")
     except OSError as exc:
+        update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
+        write_status(args.status_file, status)
+        LOGGER.exception("OSError")
         parser.exit(status=1, message=f"datasocial file error: {exc}\n")
+    except Exception as exc:
+        update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
+        write_status(args.status_file, status)
+        LOGGER.exception("Unexpected error")
+        raise
 
 
 def fetch_export_rows(args: argparse.Namespace, settings: Settings, client: GraphQLClient, parser: argparse.ArgumentParser) -> list[dict[str, str]]:
@@ -316,7 +440,9 @@ def persist_and_send(args: argparse.Namespace, settings: Settings, report: dict)
     if args.save_report:
         args.save_report.parent.mkdir(parents=True, exist_ok=True)
         args.save_report.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        LOGGER.info("Saved report JSON to %s", args.save_report)
     if args.send_seatalk:
+        LOGGER.info("Sending report to SeaTalk...")
         seatalk_settings = SeaTalkSettings(
             app_id=settings.seatalk_app_id,
             app_secret=settings.seatalk_app_secret,
@@ -324,6 +450,7 @@ def persist_and_send(args: argparse.Namespace, settings: Settings, report: dict)
             employee_code=settings.seatalk_employee_code,
         )
         SeaTalkClient(seatalk_settings).send_text(render_seatalk_report(report, title=args.seatalk_title))
+        LOGGER.info("SeaTalk message sent successfully.")
 
 
 if __name__ == "__main__":
