@@ -2,9 +2,6 @@ name: FFVN Daily Fetch (Scheduled)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
-      timezone: "Asia/Ho_Chi_Minh"
 
 permissions:
   contents: read
@@ -26,150 +23,36 @@ jobs:
       DATASOCIAL_APP_SLUG: ffvn
       DATASOCIAL_TIMEOUT: 300
       DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      FETCH_MARKER_PREFIX: ffvn-daily-fetch-marker
-      FETCH_TARGET_HOUR: "11"
-      FETCH_TARGET_MINUTE: "30"
-      FETCH_WINDOW_MINUTES: "120"
     steps:
-      - name: Gate fetch window and de-dup daily run
-        id: gate
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "reason=manual-dispatch" >> "$GITHUB_OUTPUT"
-            echo "marker_name=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          gate_json="$(python - <<'PY'
-          import json
-          import os
-          from datetime import datetime, timedelta
-          from zoneinfo import ZoneInfo
-
-          tz = ZoneInfo("Asia/Ho_Chi_Minh")
-          now = datetime.now(tz)
-          target_hour = int(os.environ["FETCH_TARGET_HOUR"])
-          target_minute = int(os.environ["FETCH_TARGET_MINUTE"])
-          window_minutes = int(os.environ["FETCH_WINDOW_MINUTES"])
-          target = now.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
-          delta_min = int((now - target).total_seconds() // 60)
-          should_run = 0 <= delta_min <= window_minutes
-          marker_name = f"{os.environ['FETCH_MARKER_PREFIX']}-{now:%Y%m%d}"
-          print(
-              json.dumps(
-                  {
-                      "now_local": now.isoformat(),
-                      "target_local": target.isoformat(),
-                      "delta_minutes": delta_min,
-                      "window_minutes": window_minutes,
-                      "should_run": should_run,
-                      "reason": "inside-window" if should_run else "outside-window",
-                      "marker_name": marker_name,
-                  }
-              )
-          )
-          PY
-          )"
-
-          should_run="$(python -c "import json,sys; print('true' if json.loads(sys.argv[1])['should_run'] else 'false')" "$gate_json")"
-          reason="$(python -c "import json,sys; print(json.loads(sys.argv[1])['reason'])" "$gate_json")"
-          marker_name="$(python -c "import json,sys; print(json.loads(sys.argv[1])['marker_name'])" "$gate_json")"
-
-          if [[ "$should_run" == "true" ]]; then
-            exists="$(gh api -H "Accept: application/vnd.github+json" "/repos/${REPO}/actions/artifacts?per_page=100" | python -c "import json,sys; data=json.load(sys.stdin); print('true' if any(a.get('name') == '$marker_name' and not a.get('expired') for a in data.get('artifacts', [])) else 'false')")"
-            if [[ "$exists" == "true" ]]; then
-              should_run="false"
-              reason="already-ran-today"
-            fi
-          fi
-
-          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
-          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
-          echo "marker_name=${marker_name}" >> "$GITHUB_OUTPUT"
-          echo "gate_json=${gate_json}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
-        if: steps.gate.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: steps.gate.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        if: steps.gate.outputs.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Run FFVN daily fetch
-        if: steps.gate.outputs.should_run == 'true'
-        run: |
-          python -m datasocial \
-            --preset ffvn_daily \
-            --fetch-only \
-            --debug \
-            --log-file outputs/ffvn_daily_fetch.log \
-            --status-file outputs/ffvn_daily_fetch_status.json
+        run: python -m datasocial --preset ffvn_daily --fetch-only
 
       - name: Build job summary
         if: always()
         shell: bash
         run: |
-          mkdir -p outputs
-          status_phase="missing"
-          status_updated="-"
-          if [[ -f outputs/ffvn_daily_fetch_status.json ]]; then
-            status_phase="$(python -c "import json;print(json.load(open('outputs/ffvn_daily_fetch_status.json',encoding='utf-8')).get('phase','-'))")"
-            status_updated="$(python -c "import json;print(json.load(open('outputs/ffvn_daily_fetch_status.json',encoding='utf-8')).get('updated_at_utc','-'))")"
-          fi
           {
             echo "# FFVN Daily Fetch"
             echo
-            echo "- Scheduled target: \`11:30-13:30 Asia/Ho_Chi_Minh (test window)\`"
+            echo "- Trigger mode: \`workflow_dispatch\`"
             echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
-            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
-            echo "- Gate should_run: \`${{ steps.gate.outputs.should_run }}\`"
-            echo "- Gate reason: \`${{ steps.gate.outputs.reason }}\`"
-            echo "- Status phase: \`${status_phase}\`"
-            echo "- Status updated_at_utc: \`${status_updated}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload fetch artifact
-        if: always() && steps.gate.outputs.should_run == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-fetch-latest
-          path: |
-            outputs/ffvn_daily_latest.csv
-            outputs/ffvn_daily_fetch.log
-            outputs/ffvn_daily_fetch_status.json
+          path: outputs/ffvn_daily_latest.csv
           if-no-files-found: warn
-          retention-days: 2
-
-      - name: Create daily marker file
-        if: success() && steps.gate.outputs.should_run == 'true' && github.event_name == 'schedule'
-        shell: bash
-        run: |
-          mkdir -p outputs
-          {
-            echo "marker=${{ steps.gate.outputs.marker_name }}"
-            echo "event=${GITHUB_EVENT_NAME}"
-            echo "run_id=${GITHUB_RUN_ID}"
-            echo "created_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-          } > outputs/fetch_marker.txt
-
-      - name: Upload daily marker artifact
-        if: success() && steps.gate.outputs.should_run == 'true' && github.event_name == 'schedule'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.gate.outputs.marker_name }}
-          path: outputs/fetch_marker.txt
-          if-no-files-found: warn
-          retention-days: 3

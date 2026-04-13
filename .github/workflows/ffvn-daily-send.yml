@@ -2,11 +2,6 @@ name: FFVN Daily Send (Scheduled)
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows:
-      - FFVN Daily Fetch (Scheduled)
-    types:
-      - completed
 
 permissions:
   contents: read
@@ -18,9 +13,8 @@ concurrency:
 
 jobs:
   ffvn-daily-send:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 20
     environment: ffvn-reporting
     env:
       SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
@@ -29,195 +23,54 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest
-      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-      SEND_TARGET_HOUR: "11"
-      SEND_TARGET_MINUTE: "35"
-      SEND_LATEST_HOUR: "13"
-      SEND_LATEST_MINUTE: "30"
-      FETCH_WAIT_TIMEOUT_SECONDS: "3600"
-      FETCH_WAIT_POLL_SECONDS: "30"
     steps:
-      - name: Gate send time window
-        id: gate_send
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "reason=manual-dispatch" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          gate_json="$(python - <<'PY'
-          import json
-          import os
-          import time
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-
-          tz = ZoneInfo("Asia/Ho_Chi_Minh")
-          now = datetime.now(tz)
-          target = now.replace(
-              hour=int(os.environ["SEND_TARGET_HOUR"]),
-              minute=int(os.environ["SEND_TARGET_MINUTE"]),
-              second=0,
-              microsecond=0,
-          )
-          latest = now.replace(
-              hour=int(os.environ["SEND_LATEST_HOUR"]),
-              minute=int(os.environ["SEND_LATEST_MINUTE"]),
-              second=0,
-              microsecond=0,
-          )
-
-          reason = "inside-window"
-          should_run = True
-          wait_seconds = 0
-
-          if now < target:
-              wait_seconds = int((target - now).total_seconds())
-              reason = "wait-until-target"
-          elif now > latest:
-              should_run = False
-              reason = "outside-window-too-late"
-
-          if wait_seconds > 0:
-              time.sleep(wait_seconds)
-              now = datetime.now(tz)
-
-          print(
-              json.dumps(
-                  {
-                      "should_run": should_run,
-                      "reason": reason,
-                      "wait_seconds": wait_seconds,
-                      "now_local": now.isoformat(),
-                      "target_local": target.isoformat(),
-                      "latest_local": latest.isoformat(),
-                  }
-              )
-          )
-          PY
-          )"
-
-          should_run="$(python -c "import json,sys; print('true' if json.loads(sys.argv[1])['should_run'] else 'false')" "$gate_json")"
-          reason="$(python -c "import json,sys; print(json.loads(sys.argv[1])['reason'])" "$gate_json")"
-          wait_seconds="$(python -c "import json,sys; print(json.loads(sys.argv[1])['wait_seconds'])" "$gate_json")"
-          if [[ "$should_run" == "true" && -n "${SOURCE_RUN_ID}" ]]; then
-            has_source_artifact="$(gh api -H "Accept: application/vnd.github+json" "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" | python -c "import json,sys; data=json.load(sys.stdin); print('true' if any(a.get('name') == 'ffvn-daily-fetch-latest' and not a.get('expired') for a in data.get('artifacts', [])) else 'false')")"
-            if [[ "$has_source_artifact" != "true" ]]; then
-              should_run="false"
-              reason="source-run-no-fetch-artifact"
-              wait_seconds="0"
-            fi
-          fi
-          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
-          echo "reason=${reason}" >> "$GITHUB_OUTPUT"
-          echo "wait_seconds=${wait_seconds}" >> "$GITHUB_OUTPUT"
-          echo "gate_json=${gate_json}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
-        if: steps.gate_send.outputs.should_run == 'true'
         uses: actions/checkout@v4
 
       - name: Set up Python
-        if: steps.gate_send.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
-        if: steps.gate_send.outputs.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Download latest fetch artifact
-        if: steps.gate_send.outputs.should_run == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
+
           python - <<'PY'
           import json
-          import os
-          import subprocess
-          import time
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
 
-          repo = os.environ["REPO"]
-          source_run_id = os.environ.get("SOURCE_RUN_ID", "").strip()
-          wait_timeout = int(os.environ.get("FETCH_WAIT_TIMEOUT_SECONDS", "3600"))
-          wait_poll = int(os.environ.get("FETCH_WAIT_POLL_SECONDS", "30"))
-          target_name = "ffvn-daily-fetch-latest"
+          artifacts = json.loads(Path("artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
           cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+          target_name = "ffvn-daily-fetch-latest"
 
-          def gh_api(path: str) -> dict:
-              output = subprocess.check_output(
-                  ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
-                  text=True,
-              )
-              return json.loads(output)
-
-          def pick_latest_artifact_id(artifacts: list[dict]) -> int | None:
-              candidates = []
-              for artifact in artifacts:
-                  if artifact.get("name") != target_name or artifact.get("expired"):
-                      continue
-                  created_at = artifact.get("created_at")
-                  if not created_at:
-                      continue
-                  created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-                  if created_dt >= cutoff:
-                      candidates.append((created_dt, artifact["id"]))
-              if not candidates:
-                  return None
-              candidates.sort(reverse=True)
-              return int(candidates[0][1])
-
-          def has_running_fetch() -> bool:
-              data = gh_api(f"/repos/{repo}/actions/workflows/ffvn-daily-fetch.yml/runs?branch=main&per_page=20")
-              for run in data.get("workflow_runs", []):
-                  status = run.get("status", "")
-                  if status in ("queued", "in_progress", "waiting", "pending", "requested"):
-                      return True
-              return False
-
-          start = time.time()
-          artifact_id = None
-
-          while time.time() - start <= wait_timeout:
-              if source_run_id:
-                  run_info = gh_api(f"/repos/{repo}/actions/runs/{source_run_id}")
-                  run_status = run_info.get("status")
-                  run_conclusion = run_info.get("conclusion")
-                  artifacts = gh_api(f"/repos/{repo}/actions/runs/{source_run_id}/artifacts?per_page=100").get("artifacts", [])
-                  artifact_id = pick_latest_artifact_id(artifacts)
-                  if artifact_id is not None:
-                      break
-                  if run_status == "completed" and run_conclusion != "success":
-                      raise SystemExit(
-                          f"Source fetch run {source_run_id} completed with conclusion={run_conclusion}; no artifact to send."
-                      )
-                  print(f"Waiting source fetch run {source_run_id} to publish artifact...")
-                  time.sleep(wait_poll)
+          candidates = []
+          for artifact in artifacts:
+              if artifact.get("name") != target_name or artifact.get("expired"):
                   continue
+              created_at = artifact.get("created_at")
+              if not created_at:
+                  continue
+              created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+              if created_dt >= cutoff:
+                  candidates.append((created_dt, artifact["id"]))
 
-              artifacts = gh_api(f"/repos/{repo}/actions/artifacts?per_page=100").get("artifacts", [])
-              artifact_id = pick_latest_artifact_id(artifacts)
-              if artifact_id is not None:
-                  break
+          if not candidates:
+              raise SystemExit(
+                  "No recent fetch artifact found in the last 12 hours. Run FFVN Daily Fetch (Scheduled) first."
+              )
 
-              if not has_running_fetch():
-                  raise SystemExit("No recent fetch artifact found and no running fetch job detected.")
-
-              print("Fetch job is running; waiting for artifact...")
-              time.sleep(wait_poll)
-
-          if artifact_id is None:
-              raise SystemExit("Timed out waiting for fetch artifact.")
-
-          Path("artifact_id.txt").write_text(str(artifact_id), encoding="utf-8")
+          candidates.sort(reverse=True)
+          Path("artifact_id.txt").write_text(str(candidates[0][1]), encoding="utf-8")
           PY
 
           artifact_id="$(cat artifact_id.txt)"
@@ -235,16 +88,12 @@ jobs:
           PY
 
       - name: Build and send report from fetched CSV
-        if: steps.gate_send.outputs.should_run == 'true'
         run: |
           python -m datasocial \
             --preset ffvn_daily \
             --analyze-only \
             --load-export outputs/ffvn_daily_latest.csv \
-            --send-seatalk \
-            --debug \
-            --log-file outputs/ffvn_daily_send.log \
-            --status-file outputs/ffvn_daily_send_status.json
+            --send-seatalk
 
       - name: Build job summary
         if: always()
@@ -252,27 +101,12 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          import os
           from pathlib import Path
 
           path = Path("outputs/ffvn_daily_latest.json")
-          status_path = Path("outputs/ffvn_daily_send_status.json")
           summary_path = Path("${GITHUB_STEP_SUMMARY}")
-          event_name = os.environ.get("GITHUB_EVENT_NAME", "-")
-          status_data = {}
-          if status_path.exists():
-              status_data = json.loads(status_path.read_text(encoding="utf-8"))
           if not path.exists():
-              lines = [
-                  "# FFVN Daily Send",
-                  "",
-                  "FFVN daily send did not produce a JSON artifact.",
-                  f"- Event: `{event_name}`",
-                  f"- Status phase: `{status_data.get('phase', '-')}`",
-                  f"- Status updated_at_utc: `{status_data.get('updated_at_utc', '-')}`",
-                  f"- Error: `{status_data.get('error', '-')}`",
-              ]
-              summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+              summary_path.write_text("FFVN daily send did not produce a JSON artifact.\n", encoding="utf-8")
               raise SystemExit(0)
 
           report = json.loads(path.read_text(encoding="utf-8"))
@@ -280,29 +114,18 @@ jobs:
           lines = [
               "# FFVN Daily Send",
               "",
-              "- Scheduled target: `11:35-13:30 Asia/Ho_Chi_Minh (test window)`",
-              f"- Event: `{event_name}`",
-              f"- Trigger source run id: `{os.environ.get('SOURCE_RUN_ID', '') or '-'}`",
-              "- Gate should_run: `${{ steps.gate_send.outputs.should_run }}`",
-              "- Gate reason: `${{ steps.gate_send.outputs.reason }}`",
-              "- Gate wait_seconds: `${{ steps.gate_send.outputs.wait_seconds }}`",
+              "- Trigger mode: `workflow_dispatch`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Total views 7D: `{overview.get('totalView', 0)}`",
               f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
-              f"- Status phase: `{status_data.get('phase', '-')}`",
-              f"- Status updated_at_utc: `{status_data.get('updated_at_utc', '-')}`",
-              f"- Error: `{status_data.get('error', '-')}`",
           ]
           summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
       - name: Upload send artifact
-        if: always() && steps.gate_send.outputs.should_run == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-send-latest
-          path: |
-            outputs/ffvn_daily_latest.json
-            outputs/ffvn_daily_send.log
-            outputs/ffvn_daily_send_status.json
+          path: outputs/ffvn_daily_latest.json
           if-no-files-found: warn

@@ -1,107 +1,90 @@
-# Hướng Dẫn Vận Hành GitHub Actions
+# HƯỚNG DẪN VẬN HÀNH GITHUB ACTIONS
 
 Tài liệu này dành cho người vận hành tool `datasocial` trên GitHub.
 
-Mục tiêu của tài liệu:
+## 1. Tool đang chạy theo mô hình nào
 
-- giải thích từng workflow dùng để làm gì
-- khi nào dùng workflow nào
-- chỗ nào để sửa giờ chạy
-- chỗ nào để cập nhật secrets
-- cách xử lý các lỗi thường gặp
+Hiện nay scheduler chính **không còn nằm trong GitHub cron**.
 
-## 1. Tool này đang làm gì
+Mô hình production hiện tại là:
 
-Tool này tự động tạo báo cáo FFVN từ hệ thống Social Data private của công ty.
+1. Google Apps Script gọi workflow fetch trên GitHub.
+2. Workflow fetch lấy dữ liệu từ Social Data và lưu artifact CSV.
+3. Google Apps Script gọi workflow send trên GitHub.
+4. Workflow send đọc artifact CSV, build report và gửi SeaTalk.
 
-Flow production hiện tại:
+Project Apps Script đang dùng:
 
-1. lấy dữ liệu từ Social Data
-2. lưu file CSV đã fetch thành artifact trên GitHub
-3. build report từ file CSV đó
-4. gửi report sang SeaTalk
+- `push_repo_ffdatareport`
 
-Flow production được tách thành hai workflow riêng:
-
-- fetch trước
-- send sau
-
-Mục đích là để nếu bước fetch lâu thì vẫn không làm lệch giờ gửi SeaTalk.
-
-## 2. Các workflow chính trên GitHub Actions
+## 2. Các workflow chính trên GitHub
 
 ### `FFVN Daily Fetch (Scheduled)`
 
 Mục đích:
 
-- lấy dữ liệu từ Social Data trước giờ gửi
-- lưu artifact CSV
+- lấy dữ liệu từ Social Data
+- lưu file CSV thành artifact
 
-Giờ chạy hiện tại:
+Lưu ý:
 
-- `09:00` giờ Việt Nam
+- workflow này hiện được gọi bằng `workflow_dispatch`
+- Apps Script là thành phần quyết định giờ chạy thực tế
 
-Output chính:
+Output:
 
 - `outputs/ffvn_daily_latest.csv`
-- file này được upload thành artifact trên GitHub
+- artifact tên `ffvn-daily-fetch-latest`
 
 ### `FFVN Daily Send (Scheduled)`
 
 Mục đích:
 
-- tải artifact fetch mới nhất
-- phân tích dữ liệu
-- gửi report sang SeaTalk
+- tải artifact CSV fetch mới nhất
+- chạy `analyze-only`
+- gửi report qua SeaTalk
 
-Giờ chạy hiện tại:
+Lưu ý:
 
-- `09:50` giờ Việt Nam
+- workflow này hiện được gọi bằng `workflow_dispatch`
+- Apps Script là thành phần quyết định giờ chạy thực tế
 
-Output chính:
+Output:
 
 - `outputs/ffvn_daily_latest.json`
-- gửi tin nhắn report vào group SeaTalk đã cấu hình
+- artifact tên `ffvn-daily-send-latest`
 
 ### `FFVN Report Control Panel`
 
 Mục đích:
 
 - chạy tay khi cần
-- dùng để test
-- có thể chạy có hoặc không gửi SeaTalk
+- test report
+- test gửi SeaTalk
+- rerun thủ công
 
-Dùng workflow này khi:
-
-- muốn test nhanh
-- muốn chạy lại thủ công
-- muốn thử cửa sổ nhỏ như `1D`
-- muốn xác nhận thay đổi trước khi để auto chạy
+Những gì chọn trong form của workflow này chỉ áp dụng cho **lần chạy đó**, không lưu thành cấu hình production.
 
 ### `SeaTalk Test Ping`
 
 Mục đích:
 
-- test riêng bot SeaTalk
-- không gọi Social Data
+- test bot SeaTalk nhanh
+- không fetch Social Data
+- không build report thật
 
-Dùng workflow này khi:
+## 3. Khi nào dùng workflow nào
 
-- chỉ muốn kiểm tra bot có gửi vào group được không
-- không muốn chờ bước fetch data
+### Vận hành bình thường
 
-## 3. Khi nào nên dùng workflow nào
+Không cần bấm tay gì cả.
 
-### Chạy production hằng ngày
-
-Để GitHub tự chạy:
+Apps Script sẽ tự gọi:
 
 - `FFVN Daily Fetch (Scheduled)`
 - `FFVN Daily Send (Scheduled)`
 
-Không cần bấm tay mỗi ngày.
-
-### Test bot SeaTalk nhanh nhất
+### Test bot nhanh nhất
 
 Dùng:
 
@@ -113,103 +96,77 @@ Dùng:
 
 - `FFVN Report Control Panel`
 
-Thiết lập test gợi ý:
+Gợi ý test nhẹ:
 
 - `send_seatalk = false`
 - `fetch_window = 1D`
 - `report_mode = complete_previous_day`
 
-Khi bước này ổn, có thể chạy lại với:
+### Test flow production tách riêng
 
-- `send_seatalk = true`
+Chạy đúng thứ tự:
 
-## 4. Lịch production đang chạy thế nào
+1. `FFVN Daily Fetch (Scheduled)`
+2. đợi artifact fetch xuất hiện
+3. `FFVN Daily Send (Scheduled)`
 
-Lịch production hiện tại:
+## 4. Giờ chạy thật đang nằm ở đâu
 
-- `09:00` giờ Việt Nam: fetch dữ liệu
-- `09:50` giờ Việt Nam: gửi report
+Giờ chạy thật **nằm ở Apps Script**, không còn nằm trong cron của workflow YAML.
 
-Vì sao tách làm 2 workflow:
+Nếu muốn đổi giờ:
 
-- fetch từ Social Data có thể mất nhiều phút
-- report vẫn cần gửi vào một khung giờ cố định
+1. mở Apps Script project `push_repo_ffdatareport`
+2. sửa giờ/trigger trong Apps Script
+3. lưu lại
 
-## 5. Chỗ sửa giờ chạy
+## 5. Logic report production hiện tại
 
-### Sửa giờ fetch
+Preset production đang dùng:
 
-File:
+- `ffvn_daily`
 
-- `.github/workflows/ffvn-daily-fetch.yml`
+Thông số chính:
 
-Cron hiện tại:
+- `fetch_window = 7D`
+- `report_mode = complete_previous_day`
+- timezone: `Asia/Ho_Chi_Minh`
+- category ids: `14, 22, 23, 24`
+- platform ids: `0, 2`
+- fetch chia theo:
+  - category
+  - day
 
-- `0 2 * * *`
+Hashtag coverage hiện tại:
 
-Ý nghĩa:
+- `#freefire`
+- `#nhasangtaofreefire`
+- `#free_fire`
+- `#garenafreefire`
+- `#sangtaofreefire`
+- `#craftland`
+- `#garena`
 
-- `02:00 UTC`
-- `09:00` giờ Việt Nam
+## 6. Các phần chính trong report
 
-### Sửa giờ send
+- `Top Content 1D`
+- `Trend Videos 7D`
+- `Daily Views 7D`
+- `Daily Posts 7D`
+- `Top KOLs 7D`
+- `Overview 7D`
 
-File:
+Trong đó:
 
-- `.github/workflows/ffvn-daily-send.yml`
+- `Daily Views 7D` lấy theo toàn bộ tập KOL đã fetch, không bó hashtag
+- `Daily Posts 7D` lấy theo toàn bộ tập KOL đã fetch, không bó hashtag
+- `Overview 7D` cũng là tổng toàn bộ tập KOL đã fetch
 
-Cron hiện tại:
+## 7. Secrets cần có
 
-- `50 2 * * *`
+GitHub Environment:
 
-Ý nghĩa:
-
-- `02:50 UTC`
-- `09:50` giờ Việt Nam
-
-Nếu muốn đổi giờ tự động:
-
-1. sửa cron trong file workflow
-2. commit
-3. push lên `main`
-
-## 6. Chỗ sửa logic report
-
-### Preset mặc định
-
-File:
-
-- `presets/ffvn_daily.json`
-
-Dùng file này để đổi:
-
-- category cần track
-- platform cần track
-- hashtag filter
-- event hashtag
-- top limit
-- minimum views của trend video
-- title mặc định khi gửi SeaTalk
-
-### Text và cách hiển thị report
-
-Các file chính:
-
-- `datasocial/formatter.py`
-- `datasocial/report_engine.py`
-
-Dùng để sửa:
-
-- tên các section
-- wording khi gửi SeaTalk
-- cách hiển thị gọn hay dài
-- thứ tự các block trong report
-
-## 7. Chỗ sửa secrets
-
-Trên GitHub:
-
-- `Settings -> Environments -> ffvn-reporting`
+- `ffvn-reporting`
 
 Secrets bắt buộc:
 
@@ -218,147 +175,98 @@ Secrets bắt buộc:
 - `SEATALK_APP_SECRET`
 - `SEATALK_GROUP_ID`
 
-## 8. Cách refresh `DATASOCIAL_USESSION`
+## 8. Nếu cần cập nhật `DATASOCIAL_USESSION`
 
-`DATASOCIAL_USESSION` là cookie session lấy từ website Social Data.
+Lấy từ browser khi đang đăng nhập `socialdata.garena.vn`.
 
-Cách lấy:
+Cách làm:
 
-1. mở `socialdata.garena.vn`
-2. đăng nhập bằng tài khoản đang có quyền
-3. mở DevTools của trình duyệt
-4. vào phần Cookies hoặc chọn một request GraphQL
-5. copy giá trị `usession`
-6. cập nhật lại GitHub Environment secret `DATASOCIAL_USESSION`
+1. mở website Social Data
+2. đăng nhập đúng tài khoản có quyền
+3. mở DevTools
+4. tìm cookie `usession`
+5. copy giá trị
+6. cập nhật lại GitHub secret `DATASOCIAL_USESSION`
 
-Nếu cookie này hết hạn thì workflow fetch sẽ fail.
-
-## 9. Cách đọc artifacts
+## 9. Cách đọc artifact
 
 Sau khi workflow chạy xong:
 
-1. mở workflow run
-2. kéo xuống phần `Artifacts`
-3. tải file zip về
+1. mở run trên tab `Actions`
+2. kéo xuống `Artifacts`
+3. tải file zip
 4. giải nén trên máy
 
-Các file phổ biến:
+Thường sẽ có:
 
-- fetch workflow:
+- fetch:
   - `ffvn_daily_latest.csv`
-- send/analyze workflow:
+- send:
   - `ffvn_daily_latest.json`
 
-## 10. Cách xử lý lỗi thường gặp
+## 10. Các lỗi thường gặp
 
-### Trường hợp A: fetch chạy lâu
+### Không có fetch artifact cho send
 
-Nguyên nhân thường là Social Data phản hồi chậm.
+Biểu hiện:
 
-Chỗ cần xem:
+- `No recent fetch artifact found in the last 12 hours. Run FFVN Daily Fetch (Scheduled) first.`
 
-- step `Run FFVN daily fetch`
+Ý nghĩa:
 
-Lưu ý:
+- send không tìm thấy artifact CSV mới
 
-- workflow có timeout
-- nó không chạy mãi mãi
+Fix:
 
-### Trường hợp B: fetch bị timeout
+- chạy fetch trước
+- hoặc kiểm tra Apps Script có trigger fetch thành công không
 
-Ví dụ lỗi:
+### Fetch bị timeout
 
-- `Read timed out`
+Biểu hiện:
 
-Cách xử lý:
+- read timeout
+- workflow chạy lâu rồi fail
 
-- tăng timeout
-- test với `fetch_window = 1D`
-- refresh lại `DATASOCIAL_USESSION`
+Fix:
 
-### Trường hợp C: send workflow fail trước khi gửi SeaTalk
+- kiểm tra `DATASOCIAL_USESSION`
+- test bằng `1D` qua control panel
+- kiểm tra backend Social Data
 
-Khả năng:
-
-- không tìm thấy fetch artifact
-
-Cách xử lý:
-
-- kiểm tra fetch workflow trước đó có chạy thành công không
-- nếu cần thì chạy tay fetch trước
-- rồi chạy lại send
-
-### Trường hợp D: SeaTalk gửi lỗi
+### SeaTalk gửi lỗi
 
 Khả năng:
 
-- sai `SEATALK_APP_ID`
-- sai `SEATALK_APP_SECRET`
-- sai `SEATALK_GROUP_ID`
-- bot đã bị remove khỏi group
+- sai app id/secret
+- sai group id
+- bot bị remove khỏi group
 
-Cách test nhanh nhất:
+Fix nhanh:
 
 - chạy `SeaTalk Test Ping`
 
-### Trường hợp E: muốn sửa text report
+## 11. Khi nào cần vào GitHub
 
-Sửa:
+Chỉ cần vào GitHub khi:
 
-- `datasocial/formatter.py`
+- muốn test
+- muốn rerun
+- muốn xem log lỗi
+- muốn xem artifact
+- muốn đổi wording report
+- muốn cập nhật secret
 
-Sau đó:
+Bạn **không cần** vào GitHub bấm tay hằng ngày nếu Apps Script đang trigger đúng.
 
-1. commit
-2. push
-3. chạy `FFVN Report Control Panel` để test lại
+## 12. Ghi nhớ ngắn gọn nhất
 
-## 11. Cái gì nên sửa, cái gì không nên sửa lung tung
+- `SeaTalk Test Ping` = test bot
+- `FFVN Report Control Panel` = chạy tay
+- `FFVN Daily Fetch (Scheduled)` = workflow fetch do Apps Script gọi
+- `FFVN Daily Send (Scheduled)` = workflow send do Apps Script gọi
 
-Thường có thể sửa an toàn:
+Và:
 
-- rerun workflow
-- test bằng control panel với cửa sổ nhỏ
-- update secrets
-- chạy SeaTalk ping
-
-Cần cẩn thận khi sửa:
-
-- cron schedule
-- preset category/platform
-- logic report engine
-
-## 12. Quy trình vận hành gợi ý
-
-### Vận hành bình thường
-
-Không cần làm gì.
-
-GitHub sẽ tự:
-
-- fetch lúc `09:00`
-- send lúc `09:50`
-
-### Khi thấy có vấn đề
-
-Làm theo thứ tự:
-
-1. kiểm tra `FFVN Daily Fetch (Scheduled)`
-2. kiểm tra `FFVN Daily Send (Scheduled)`
-3. chạy `SeaTalk Test Ping`
-4. nếu cần thì chạy `FFVN Report Control Panel`
-
-## 13. Giới hạn hiện tại của tool
-
-Tool này hiện vẫn phụ thuộc vào:
-
-- cookie session browser của Social Data
-
-Nó chưa dùng service account cố định hay API token chính thức.
-
-Điều đó có nghĩa là:
-
-- nếu `DATASOCIAL_USESSION` hết hạn
-- hoặc tài khoản mất quyền
-
-thì workflow fetch sẽ fail cho đến khi bạn cập nhật secret mới.
+- scheduler chính là Apps Script
+- GitHub chỉ là nơi thực thi workflow

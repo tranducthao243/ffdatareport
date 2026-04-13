@@ -115,26 +115,26 @@ Run the same manual workflow with:
 
 Verify the report reaches the SeaTalk group.
 
-### 7. Turn on the schedule
+### 7. Trigger model
 
-The fetch workflow currently runs at:
+The production repository no longer relies on GitHub cron schedules for fetch/send.
 
-- `02:00 UTC`
-- equivalent to `09:00` in Vietnam when offset is `UTC+7`
+Current model:
 
-The send workflow currently runs at:
+- Google Apps Script is the scheduler
+- Apps Script calls the GitHub workflows with `workflow_dispatch`
+- GitHub acts as the execution layer
 
-- `02:50 UTC`
-- equivalent to `09:50` in Vietnam when offset is `UTC+7`
+Current Apps Script project:
 
-The weekly workflow currently runs at:
+- `push_repo_ffdatareport`
 
-- `02:10 UTC` every Monday
-- equivalent to `09:10` in Vietnam every Monday when offset is `UTC+7`
+Recommended production timing:
 
-If you want a different time, edit the cron in:
+- fetch trigger at `08:30` Vietnam time
+- send trigger at `09:30` Vietnam time
 
-- `.github/workflows/ffvn-daily-report.yml`
+If you want to change timings, change them in Apps Script, not in the workflow YAML.
 
 ## Operational caveats
 
@@ -150,15 +150,13 @@ That means:
 
 Operationally, treat it as a rotating secret, not a permanent API token.
 
-### GitHub schedule is fixed in workflow YAML
+### Scheduler is external
 
-If you want to change the automatic timings, edit the cron expressions in the fetch/send workflows and commit the change.
+The repository is now simpler:
 
-GitHub Actions does not support a 1-minute cron for normal scheduled workflows. In practice:
-
-- use `SeaTalk Test Ping` for immediate delivery tests
-- use the manual control workflow for real report tests
-- if you really need a scheduled test loop, the practical minimum on GitHub-hosted runners is every 5 minutes
+- no GitHub cron dependency for production timing
+- Apps Script decides when to dispatch fetch/send
+- GitHub only runs what Apps Script triggers
 
 ### Manual workflow is the main operator interface
 

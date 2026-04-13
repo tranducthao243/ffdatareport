@@ -107,19 +107,14 @@ Required GitHub Secrets:
 - `SEATALK_APP_SECRET`
 - `SEATALK_GROUP_ID`
 
-Default schedule in the scaffold:
-
-- `02:10 UTC`
-- equivalent to `09:10` in Vietnam when offset is `UTC+7`
-
 Recommended production setup:
 
 - private GitHub repo
 - Actions tab as the operator interface
 - `ffvn-reporting` GitHub Environment for production secrets
+- use Google Apps Script as the scheduler/trigger layer
+- let Apps Script call the fetch and send workflows through `workflow_dispatch`
 - use the manual control workflow for one-off runs
-- use the scheduled fetch workflow to prepare data before 09:30 Vietnam time
-- use the scheduled send workflow to deliver the prepared report at 10:30 Vietnam time
 - use the SeaTalk test ping workflow when you only want to validate bot delivery quickly
 
 ## Operator guide

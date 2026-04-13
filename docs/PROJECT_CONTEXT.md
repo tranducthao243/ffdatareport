@@ -212,11 +212,7 @@ Nó **không tự lưu** cấu hình sang workflow scheduled.
 
 ### 3. `FFVN Daily Fetch (Scheduled)`
 
-Đây là workflow tự động fetch dữ liệu production.
-
-Lịch hiện tại:
-
-- **09:00 giờ Việt Nam mỗi ngày**
+Đây là workflow fetch dữ liệu production, nhưng hiện được trigger bởi App Script chứ không tự cron trong GitHub.
 
 Nó sẽ:
 
@@ -233,11 +229,7 @@ CSV chính:
 
 ### 4. `FFVN Daily Send (Scheduled)`
 
-Đây là workflow tự động gửi report production.
-
-Lịch hiện tại:
-
-- **09:50 giờ Việt Nam mỗi ngày**
+Đây là workflow gửi report production, nhưng hiện được trigger bởi App Script chứ không tự cron trong GitHub.
 
 Nó sẽ:
 
@@ -265,10 +257,12 @@ Lý do:
 
 Mô hình hiện tại:
 
-- 09:00 fetch trước
-- 09:50 send sau
+- App Script trigger fetch trước
+- App Script trigger send sau
 
-Đây là mô hình production chính thức đang dùng.
+Project App Script hiện đang dùng:
+
+- `push_repo_ffdatareport`
 
 ## 11. Một lưu ý rất quan trọng về artifact
 
@@ -287,9 +281,7 @@ Hiện đã có guard:
 Thông thường:
 
 - không cần bấm tay gì cả
-- GitHub sẽ tự chạy:
-  - fetch lúc 09:00
-  - send lúc 09:50
+- App Script sẽ tự gọi GitHub workflow theo giờ đã cấu hình
 
 Chỉ cần vào GitHub khi:
 
@@ -343,20 +335,16 @@ Chạy đúng thứ tự:
 
 ## 15. Nếu muốn đổi giờ chạy
 
-Sửa các file:
+Hiện nay giờ chạy nên đổi ở App Script, không phải trong workflow YAML.
 
-- `.github/workflows/ffvn-daily-fetch.yml`
-- `.github/workflows/ffvn-daily-send.yml`
+Project đang dùng:
 
-Hiện đang là:
+- `push_repo_ffdatareport`
 
-- fetch: `09:00` VN
-- send: `09:50` VN
+Nếu muốn đổi giờ:
 
-Sau khi sửa:
-
-1. commit
-2. push lên GitHub
+1. sửa giờ trong Apps Script
+2. lưu lại trigger hoặc logic chạy
 
 ## 16. Nếu muốn đổi wording report
 
@@ -428,8 +416,8 @@ Nếu cần nhớ cực ngắn, chỉ cần nhớ:
 
 - `SeaTalk Test Ping` = test bot
 - `FFVN Report Control Panel` = chạy tay
-- `FFVN Daily Fetch (Scheduled)` = auto lấy data lúc 09:00
-- `FFVN Daily Send (Scheduled)` = auto gửi report lúc 09:50
+- `FFVN Daily Fetch (Scheduled)` = workflow fetch do App Script gọi
+- `FFVN Daily Send (Scheduled)` = workflow send do App Script gọi
 
 Và:
 
