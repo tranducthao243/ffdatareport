@@ -34,6 +34,8 @@ jobs:
       SEND_TARGET_MINUTE: "35"
       SEND_LATEST_HOUR: "13"
       SEND_LATEST_MINUTE: "30"
+      FETCH_WAIT_TIMEOUT_SECONDS: "3600"
+      FETCH_WAIT_POLL_SECONDS: "30"
     steps:
       - name: Gate send time window
         id: gate_send
@@ -135,43 +137,87 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -n "${SOURCE_RUN_ID}" ]]; then
-            gh api \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > artifacts.json
-          else
-            gh api \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
-          fi
-
           python - <<'PY'
           import json
+          import os
+          import subprocess
+          import time
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
 
-          artifacts = json.loads(Path("artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
-          cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
+          repo = os.environ["REPO"]
+          source_run_id = os.environ.get("SOURCE_RUN_ID", "").strip()
+          wait_timeout = int(os.environ.get("FETCH_WAIT_TIMEOUT_SECONDS", "3600"))
+          wait_poll = int(os.environ.get("FETCH_WAIT_POLL_SECONDS", "30"))
           target_name = "ffvn-daily-fetch-latest"
+          cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
 
-          candidates = []
-          for artifact in artifacts:
-              if artifact.get("name") != target_name or artifact.get("expired"):
-                  continue
-              created_at = artifact.get("created_at")
-              if not created_at:
-                  continue
-              created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-              if created_dt >= cutoff:
-                  candidates.append((created_dt, artifact["id"]))
-
-          if not candidates:
-              raise SystemExit(
-                  "No recent fetch artifact found in the last 12 hours. Run FFVN Daily Fetch (Scheduled) first."
+          def gh_api(path: str) -> dict:
+              output = subprocess.check_output(
+                  ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+                  text=True,
               )
+              return json.loads(output)
 
-          candidates.sort(reverse=True)
-          Path("artifact_id.txt").write_text(str(candidates[0][1]), encoding="utf-8")
+          def pick_latest_artifact_id(artifacts: list[dict]) -> int | None:
+              candidates = []
+              for artifact in artifacts:
+                  if artifact.get("name") != target_name or artifact.get("expired"):
+                      continue
+                  created_at = artifact.get("created_at")
+                  if not created_at:
+                      continue
+                  created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+                  if created_dt >= cutoff:
+                      candidates.append((created_dt, artifact["id"]))
+              if not candidates:
+                  return None
+              candidates.sort(reverse=True)
+              return int(candidates[0][1])
+
+          def has_running_fetch() -> bool:
+              data = gh_api(f"/repos/{repo}/actions/workflows/ffvn-daily-fetch.yml/runs?branch=main&per_page=20")
+              for run in data.get("workflow_runs", []):
+                  status = run.get("status", "")
+                  if status in ("queued", "in_progress", "waiting", "pending", "requested"):
+                      return True
+              return False
+
+          start = time.time()
+          artifact_id = None
+
+          while time.time() - start <= wait_timeout:
+              if source_run_id:
+                  run_info = gh_api(f"/repos/{repo}/actions/runs/{source_run_id}")
+                  run_status = run_info.get("status")
+                  run_conclusion = run_info.get("conclusion")
+                  artifacts = gh_api(f"/repos/{repo}/actions/runs/{source_run_id}/artifacts?per_page=100").get("artifacts", [])
+                  artifact_id = pick_latest_artifact_id(artifacts)
+                  if artifact_id is not None:
+                      break
+                  if run_status == "completed" and run_conclusion != "success":
+                      raise SystemExit(
+                          f"Source fetch run {source_run_id} completed with conclusion={run_conclusion}; no artifact to send."
+                      )
+                  print(f"Waiting source fetch run {source_run_id} to publish artifact...")
+                  time.sleep(wait_poll)
+                  continue
+
+              artifacts = gh_api(f"/repos/{repo}/actions/artifacts?per_page=100").get("artifacts", [])
+              artifact_id = pick_latest_artifact_id(artifacts)
+              if artifact_id is not None:
+                  break
+
+              if not has_running_fetch():
+                  raise SystemExit("No recent fetch artifact found and no running fetch job detected.")
+
+              print("Fetch job is running; waiting for artifact...")
+              time.sleep(wait_poll)
+
+          if artifact_id is None:
+              raise SystemExit("Timed out waiting for fetch artifact.")
+
+          Path("artifact_id.txt").write_text(str(artifact_id), encoding="utf-8")
           PY
 
           artifact_id="$(cat artifact_id.txt)"

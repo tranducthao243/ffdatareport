@@ -33,9 +33,6 @@ jobs:
       ALPHA_EXPERT_ID: ${{ secrets.ALPHA_EXPERT_ID }}
       ALPHA_FOLDER_ID: ${{ secrets.ALPHA_FOLDER_ID }}
       ALPHA_TAGS: ${{ secrets.ALPHA_TAGS }}
-      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
-      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
-      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -166,50 +163,6 @@ jobs:
               out.write(f"knowledge_id={new_id if new_id is not None else ''}\n")
               out.write(f"filename={target_name}\n")
           PY
-
-      - name: Send Seatalk publish notification (non-blocking)
-        if: env.SEATALK_APP_ID != '' && env.SEATALK_APP_SECRET != '' && env.SEATALK_GROUP_ID != ''
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          alpha_file="${{ steps.publish_alpha.outputs.filename }}"
-          alpha_id="${{ steps.publish_alpha.outputs.knowledge_id }}"
-          deleted_count="${{ steps.publish_alpha.outputs.deleted_count }}"
-          if [[ -z "${alpha_file}" ]]; then alpha_file="(Alpha publish skipped or failed)"; fi
-          if [[ -z "${alpha_id}" ]]; then alpha_id="-"; fi
-          if [[ -z "${deleted_count}" ]]; then deleted_count="-"; fi
-          python - <<'PY'
-          import os
-          from datetime import datetime, timezone
-          from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
-
-          now = datetime.now(timezone.utc).astimezone().isoformat()
-          alpha_file = os.environ.get("ALPHA_FILE", "")
-          alpha_id = os.environ.get("ALPHA_ID", "")
-          deleted_count = os.environ.get("DELETED_COUNT", "")
-          message = "\n".join(
-              [
-                  "**FFVN Daily Fetch Published to Alpha Knowledge**",
-                  f"File: {alpha_file}",
-                  f"Knowledge ID: {alpha_id}",
-                  f"Deleted old entries: {deleted_count}",
-                  f"Generated at: `{now}`",
-              ]
-          )
-
-          settings = SeaTalkSettings(
-              app_id=os.environ["SEATALK_APP_ID"],
-              app_secret=os.environ["SEATALK_APP_SECRET"],
-              group_id=os.environ["SEATALK_GROUP_ID"],
-          )
-          SeaTalkClient(settings).send_text(message)
-          print("Seatalk notification sent.")
-          PY
-        env:
-          ALPHA_FILE: ${{ steps.publish_alpha.outputs.filename }}
-          ALPHA_ID: ${{ steps.publish_alpha.outputs.knowledge_id }}
-          DELETED_COUNT: ${{ steps.publish_alpha.outputs.deleted_count }}
 
       - name: Build job summary
         if: always()
