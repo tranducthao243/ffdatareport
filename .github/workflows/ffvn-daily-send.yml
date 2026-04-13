@@ -30,9 +30,10 @@ jobs:
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
-      SEND_TARGET_HOUR: "9"
-      SEND_TARGET_MINUTE: "50"
-      SEND_LATEST_HOUR: "12"
+      SEND_TARGET_HOUR: "11"
+      SEND_TARGET_MINUTE: "35"
+      SEND_LATEST_HOUR: "13"
+      SEND_LATEST_MINUTE: "30"
     steps:
       - name: Gate send time window
         id: gate_send
@@ -63,7 +64,7 @@ jobs:
           )
           latest = now.replace(
               hour=int(os.environ["SEND_LATEST_HOUR"]),
-              minute=0,
+              minute=int(os.environ["SEND_LATEST_MINUTE"]),
               second=0,
               microsecond=0,
           )
@@ -101,6 +102,14 @@ jobs:
           should_run="$(python -c "import json,sys; print('true' if json.loads(sys.argv[1])['should_run'] else 'false')" "$gate_json")"
           reason="$(python -c "import json,sys; print(json.loads(sys.argv[1])['reason'])" "$gate_json")"
           wait_seconds="$(python -c "import json,sys; print(json.loads(sys.argv[1])['wait_seconds'])" "$gate_json")"
+          if [[ "$should_run" == "true" && -n "${SOURCE_RUN_ID}" ]]; then
+            has_source_artifact="$(gh api -H "Accept: application/vnd.github+json" "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" | python -c "import json,sys; data=json.load(sys.stdin); print('true' if any(a.get('name') == 'ffvn-daily-fetch-latest' and not a.get('expired') for a in data.get('artifacts', [])) else 'false')")"
+            if [[ "$has_source_artifact" != "true" ]]; then
+              should_run="false"
+              reason="source-run-no-fetch-artifact"
+              wait_seconds="0"
+            fi
+          fi
           echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
           echo "reason=${reason}" >> "$GITHUB_OUTPUT"
           echo "wait_seconds=${wait_seconds}" >> "$GITHUB_OUTPUT"
@@ -225,7 +234,7 @@ jobs:
           lines = [
               "# FFVN Daily Send",
               "",
-              "- Scheduled target: `09:50 Asia/Ho_Chi_Minh`",
+              "- Scheduled target: `11:35-13:30 Asia/Ho_Chi_Minh (test window)`",
               f"- Event: `{event_name}`",
               f"- Trigger source run id: `{os.environ.get('SOURCE_RUN_ID', '') or '-'}`",
               "- Gate should_run: `${{ steps.gate_send.outputs.should_run }}`",

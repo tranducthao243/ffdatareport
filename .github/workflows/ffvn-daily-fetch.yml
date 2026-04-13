@@ -29,9 +29,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       FETCH_MARKER_PREFIX: ffvn-daily-fetch-marker
-      FETCH_TARGET_HOUR: "9"
-      FETCH_TARGET_MINUTE: "0"
-      FETCH_WINDOW_MINUTES: "55"
+      FETCH_TARGET_HOUR: "11"
+      FETCH_TARGET_MINUTE: "30"
+      FETCH_WINDOW_MINUTES: "120"
     steps:
       - name: Gate fetch window and de-dup daily run
         id: gate
@@ -132,7 +132,7 @@ jobs:
           {
             echo "# FFVN Daily Fetch"
             echo
-            echo "- Scheduled target: \`09:00 Asia/Ho_Chi_Minh\`"
+            echo "- Scheduled target: \`11:30-13:30 Asia/Ho_Chi_Minh (test window)\`"
             echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
             echo "- Event: \`${GITHUB_EVENT_NAME}\`"
             echo "- Gate should_run: \`${{ steps.gate.outputs.should_run }}\`"
