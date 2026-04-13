@@ -2,6 +2,9 @@ name: FFVN Daily Send (Scheduled)
 
 on:
   workflow_dispatch:
+  repository_dispatch:
+    types:
+      - ffvn-send
   workflow_run:
     workflows:
       - FFVN Daily Fetch (Scheduled)
@@ -18,7 +21,7 @@ concurrency:
 
 jobs:
   ffvn-daily-send:
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: ffvn-reporting
@@ -41,9 +44,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "repository_dispatch" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "reason=manual-dispatch" >> "$GITHUB_OUTPUT"
+            echo "reason=manual-or-repository-dispatch" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
