@@ -1,0 +1,169 @@
+name: FFVN Daily Publish Data
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - FFVN Daily Fetch (Scheduled)
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ffvn-daily-publish-data
+  cancel-in-progress: false
+
+jobs:
+  ffvn-daily-publish-data:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ffvn-reporting
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+      TARGET_ARTIFACT_NAME: ffvn-daily-fetch-latest
+      TARGET_CSV_PATH: outputs/ffvn_daily_latest.csv
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_PREFIX: ${{ secrets.S3_PREFIX }}
+      S3_PUBLIC_BASE_URL: ${{ secrets.S3_PUBLIC_BASE_URL }}
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
+      SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download fetch artifact from source run
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${SOURCE_RUN_ID}" ]]; then
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" > artifacts.json
+          else
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPO}/actions/artifacts?per_page=100" > artifacts.json
+          fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          target_name = "ffvn-daily-fetch-latest"
+          artifacts = json.loads(Path("artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
+          candidates = [a for a in artifacts if a.get("name") == target_name and not a.get("expired")]
+          if not candidates:
+              raise SystemExit("No fetch artifact found for publish workflow.")
+          candidates.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+          Path("artifact_id.txt").write_text(str(candidates[0]["id"]), encoding="utf-8")
+          PY
+
+          artifact_id="$(cat artifact_id.txt)"
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/artifacts/${artifact_id}/zip" > fetch_artifact.zip
+
+          mkdir -p outputs
+          python - <<'PY'
+          import zipfile
+          with zipfile.ZipFile("fetch_artifact.zip", "r") as zf:
+              zf.extractall("outputs")
+          PY
+
+      - name: Configure AWS credentials
+        if: env.S3_BUCKET != '' && env.AWS_REGION != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Upload latest CSV to S3 (non-blocking)
+        id: upload_s3
+        if: env.S3_BUCKET != '' && env.AWS_REGION != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=""
+          if [[ -n "${S3_PREFIX}" ]]; then
+            suffix="${S3_PREFIX%/}/"
+          fi
+          key="${suffix}ffvn_daily_latest.csv"
+          aws s3 cp "${TARGET_CSV_PATH}" "s3://${S3_BUCKET}/${key}" --only-show-errors
+
+          if [[ -n "${S3_PUBLIC_BASE_URL}" ]]; then
+            url="${S3_PUBLIC_BASE_URL%/}/${key}"
+          else
+            url="s3://${S3_BUCKET}/${key}"
+          fi
+          echo "csv_url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Send Seatalk link notification (non-blocking)
+        if: env.SEATALK_APP_ID != '' && env.SEATALK_APP_SECRET != '' && env.SEATALK_GROUP_ID != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          csv_url="${{ steps.upload_s3.outputs.csv_url }}"
+          if [[ -z "${csv_url}" ]]; then
+            csv_url="(S3 upload skipped or failed. Check workflow logs.)"
+          fi
+          python - <<'PY'
+          import os
+          from datetime import datetime, timezone
+          from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
+
+          now = datetime.now(timezone.utc).astimezone().isoformat()
+          csv_url = os.environ.get("CSV_URL", "")
+          message = "\n".join(
+              [
+                  "**FFVN Daily Fetch Data Ready**",
+                  f"CSV: {csv_url}",
+                  f"Generated at: `{now}`",
+              ]
+          )
+
+          settings = SeaTalkSettings(
+              app_id=os.environ["SEATALK_APP_ID"],
+              app_secret=os.environ["SEATALK_APP_SECRET"],
+              group_id=os.environ["SEATALK_GROUP_ID"],
+          )
+          SeaTalkClient(settings).send_text(message)
+          print("Seatalk notification sent.")
+          PY
+        env:
+          CSV_URL: ${{ steps.upload_s3.outputs.csv_url }}
+
+      - name: Build job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "# FFVN Daily Publish Data"
+            echo
+            echo "- Event: \`${GITHUB_EVENT_NAME}\`"
+            echo "- Source run id: \`${SOURCE_RUN_ID:-manual}\`"
+            echo "- CSV path: \`${TARGET_CSV_PATH}\`"
+            echo "- S3 upload outcome: \`${{ steps.upload_s3.outcome || 'skipped' }}\`"
+            echo "- CSV URL: \`${{ steps.upload_s3.outputs.csv_url || '-' }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

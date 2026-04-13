@@ -151,6 +151,7 @@ jobs:
             outputs/ffvn_daily_fetch.log
             outputs/ffvn_daily_fetch_status.json
           if-no-files-found: warn
+          retention-days: 2
 
       - name: Create daily marker file
         if: success() && steps.gate.outputs.should_run == 'true' && github.event_name == 'schedule'
