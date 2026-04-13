@@ -28,12 +28,11 @@ jobs:
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
       TARGET_ARTIFACT_NAME: ffvn-daily-fetch-latest
       TARGET_CSV_PATH: outputs/ffvn_daily_latest.csv
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      S3_BUCKET: ${{ secrets.S3_BUCKET }}
-      S3_PREFIX: ${{ secrets.S3_PREFIX }}
-      S3_PUBLIC_BASE_URL: ${{ secrets.S3_PUBLIC_BASE_URL }}
+      ALPHA_API_BASE_URL: ${{ secrets.ALPHA_API_BASE_URL }}
+      ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
+      ALPHA_EXPERT_ID: ${{ secrets.ALPHA_EXPERT_ID }}
+      ALPHA_FOLDER_ID: ${{ secrets.ALPHA_FOLDER_ID }}
+      ALPHA_TAGS: ${{ secrets.ALPHA_TAGS }}
       SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
       SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
       SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
@@ -89,56 +88,112 @@ jobs:
               zf.extractall("outputs")
           PY
 
-      - name: Configure AWS credentials
-        if: env.S3_BUCKET != '' && env.AWS_REGION != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Upload latest CSV to S3 (non-blocking)
-        id: upload_s3
-        if: env.S3_BUCKET != '' && env.AWS_REGION != '' && env.AWS_ACCESS_KEY_ID != '' && env.AWS_SECRET_ACCESS_KEY != ''
+      - name: Publish CSV to Alpha Knowledge (non-blocking)
+        id: publish_alpha
+        if: env.ALPHA_API_BASE_URL != '' && env.ALPHA_API_KEY != '' && env.ALPHA_EXPERT_ID != ''
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          suffix=""
-          if [[ -n "${S3_PREFIX}" ]]; then
-            suffix="${S3_PREFIX%/}/"
-          fi
-          key="${suffix}ffvn_daily_latest.csv"
-          aws s3 cp "${TARGET_CSV_PATH}" "s3://${S3_BUCKET}/${key}" --only-show-errors
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import requests
 
-          if [[ -n "${S3_PUBLIC_BASE_URL}" ]]; then
-            url="${S3_PUBLIC_BASE_URL%/}/${key}"
-          else
-            url="s3://${S3_BUCKET}/${key}"
-          fi
-          echo "csv_url=${url}" >> "$GITHUB_OUTPUT"
+          base_url = os.environ["ALPHA_API_BASE_URL"].rstrip("/")
+          api_key = os.environ["ALPHA_API_KEY"]
+          expert_id = os.environ["ALPHA_EXPERT_ID"]
+          csv_path = Path(os.environ["TARGET_CSV_PATH"])
+          folder_id = os.environ.get("ALPHA_FOLDER_ID", "").strip()
+          tags = os.environ.get("ALPHA_TAGS", "").strip()
 
-      - name: Send Seatalk link notification (non-blocking)
+          headers = {"Authorization": f"Bearer {api_key}"}
+          list_url = f"{base_url}/experts/{expert_id}/knowledges"
+          upload_url = list_url
+
+          list_resp = requests.get(list_url, headers=headers, timeout=30)
+          list_resp.raise_for_status()
+          entries = list_resp.json().get("knowledges", [])
+
+          target_name = csv_path.name
+          deleted = 0
+          for entry in entries:
+              if entry.get("name") != target_name:
+                  continue
+              knowledge_id = entry.get("id")
+              if not knowledge_id:
+                  continue
+              delete_url = f"{base_url}/experts/{expert_id}/knowledges/{knowledge_id}"
+              delete_resp = requests.delete(delete_url, headers=headers, timeout=30)
+              if delete_resp.status_code not in (200, 404):
+                  raise RuntimeError(
+                      f"Alpha delete failed ({delete_resp.status_code}): {delete_resp.text[:500]}"
+                  )
+              deleted += 1
+
+          form_data = {}
+          if folder_id:
+              form_data["folderId"] = folder_id
+          if tags:
+              form_data["tags"] = tags
+
+          with csv_path.open("rb") as f:
+              files = {"file": (target_name, f, "text/csv")}
+              upload_resp = requests.post(upload_url, headers=headers, data=form_data, files=files, timeout=120)
+          if upload_resp.status_code != 200:
+              raise RuntimeError(
+                  f"Alpha upload failed ({upload_resp.status_code}): {upload_resp.text[:500]}"
+              )
+          data = upload_resp.json()
+          new_id = data.get("id")
+
+          Path("outputs/alpha_publish_result.json").write_text(
+              json.dumps(
+                  {
+                      "deleted_count": deleted,
+                      "knowledge_id": new_id,
+                      "filename": target_name,
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ),
+              encoding="utf-8",
+          )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"deleted_count={deleted}\n")
+              out.write(f"knowledge_id={new_id if new_id is not None else ''}\n")
+              out.write(f"filename={target_name}\n")
+          PY
+
+      - name: Send Seatalk publish notification (non-blocking)
         if: env.SEATALK_APP_ID != '' && env.SEATALK_APP_SECRET != '' && env.SEATALK_GROUP_ID != ''
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
-          csv_url="${{ steps.upload_s3.outputs.csv_url }}"
-          if [[ -z "${csv_url}" ]]; then
-            csv_url="(S3 upload skipped or failed. Check workflow logs.)"
-          fi
+          alpha_file="${{ steps.publish_alpha.outputs.filename }}"
+          alpha_id="${{ steps.publish_alpha.outputs.knowledge_id }}"
+          deleted_count="${{ steps.publish_alpha.outputs.deleted_count }}"
+          if [[ -z "${alpha_file}" ]]; then alpha_file="(Alpha publish skipped or failed)"; fi
+          if [[ -z "${alpha_id}" ]]; then alpha_id="-"; fi
+          if [[ -z "${deleted_count}" ]]; then deleted_count="-"; fi
           python - <<'PY'
           import os
           from datetime import datetime, timezone
           from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
 
           now = datetime.now(timezone.utc).astimezone().isoformat()
-          csv_url = os.environ.get("CSV_URL", "")
+          alpha_file = os.environ.get("ALPHA_FILE", "")
+          alpha_id = os.environ.get("ALPHA_ID", "")
+          deleted_count = os.environ.get("DELETED_COUNT", "")
           message = "\n".join(
               [
-                  "**FFVN Daily Fetch Data Ready**",
-                  f"CSV: {csv_url}",
+                  "**FFVN Daily Fetch Published to Alpha Knowledge**",
+                  f"File: {alpha_file}",
+                  f"Knowledge ID: {alpha_id}",
+                  f"Deleted old entries: {deleted_count}",
                   f"Generated at: `{now}`",
               ]
           )
@@ -152,7 +207,9 @@ jobs:
           print("Seatalk notification sent.")
           PY
         env:
-          CSV_URL: ${{ steps.upload_s3.outputs.csv_url }}
+          ALPHA_FILE: ${{ steps.publish_alpha.outputs.filename }}
+          ALPHA_ID: ${{ steps.publish_alpha.outputs.knowledge_id }}
+          DELETED_COUNT: ${{ steps.publish_alpha.outputs.deleted_count }}
 
       - name: Build job summary
         if: always()
@@ -164,6 +221,17 @@ jobs:
             echo "- Event: \`${GITHUB_EVENT_NAME}\`"
             echo "- Source run id: \`${SOURCE_RUN_ID:-manual}\`"
             echo "- CSV path: \`${TARGET_CSV_PATH}\`"
-            echo "- S3 upload outcome: \`${{ steps.upload_s3.outcome || 'skipped' }}\`"
-            echo "- CSV URL: \`${{ steps.upload_s3.outputs.csv_url || '-' }}\`"
+            echo "- Alpha publish outcome: \`${{ steps.publish_alpha.outcome || 'skipped' }}\`"
+            echo "- Alpha file name: \`${{ steps.publish_alpha.outputs.filename || '-' }}\`"
+            echo "- Alpha knowledge id: \`${{ steps.publish_alpha.outputs.knowledge_id || '-' }}\`"
+            echo "- Deleted old entries: \`${{ steps.publish_alpha.outputs.deleted_count || '-' }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload publish debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffvn-daily-publish-data-latest
+          path: outputs/alpha_publish_result.json
+          if-no-files-found: warn
+          retention-days: 3
