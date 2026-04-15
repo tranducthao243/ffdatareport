@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 import requests
-
+LOGGER = logging.getLogger("datasocial")
 from .config import Settings
 from .exceptions import GraphQLHTTPError, GraphQLResponseError
 from .exporter import (
@@ -111,59 +111,62 @@ class GraphQLClient:
 
         return results
 
-    def export_insight_post_csv(
-        self,
-        *,
-        app_id: int,
-        created_at_gte: str | None,
-        created_at_lte: str | None,
-        category_ids: list[int] | None,
-        platform_ids: list[int] | None,
-        channel_ids: list[int] | None,
-        metric_ids: list[int] | None,
-        metric_duration: int,
-        ttl: str = DEFAULT_EXPORT_TTL,
-    ) -> bytes:
-        mutation = """
-mutation ExportInsight($resource: String!, $filter: JSON, $ttl: String!, $appId: UInt32!) {
-  exportInsight(resource: $resource, filter: $filter, ttl: $ttl, appId: $appId)
-}
-""".strip()
-        export_filter = build_export_filter(
-            created_at_gte=created_at_gte,
-            created_at_lte=created_at_lte,
+    def export_insight_post_rows_by_day(
+    self,
+    *,
+    app_id: int,
+    created_at_gte: str,
+    created_at_lte: str,
+    category_ids: list[int] | None,
+    platform_ids: list[int] | None,
+    channel_ids: list[int] | None,
+    metric_ids: list[int] | None,
+    metric_duration: int,
+    ttl: str = DEFAULT_EXPORT_TTL,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+
+    for day_start, day_end in build_daily_windows(created_at_gte, created_at_lte):
+        LOGGER.info(
+            "EXPORT day chunk | day_start=%s | day_end=%s | categories=%s | platforms=%s",
+            day_start,
+            day_end,
+            category_ids,
+            platform_ids,
+        )
+        csv_bytes = self.export_insight_post_csv(
+            app_id=app_id,
+            created_at_gte=day_start,
+            created_at_lte=day_end,
             category_ids=category_ids,
             platform_ids=platform_ids,
             channel_ids=channel_ids,
             metric_ids=metric_ids,
             metric_duration=metric_duration,
+            ttl=ttl,
         )
-        data = self._post(
-            {
-                "query": mutation,
-                "variables": {
-                    "resource": "Post",
-                    "appId": app_id,
-                    "ttl": ttl,
-                    "filter": export_filter,
-                },
-                "operationName": "ExportInsight",
-            }
+        parsed_rows = parse_export_csv(csv_bytes)
+        LOGGER.info(
+            "EXPORT day chunk parsed | day_start=%s | day_end=%s | row_count=%s | categories=%s | platforms=%s",
+            day_start,
+            day_end,
+            len(parsed_rows),
+            category_ids,
+            platform_ids,
         )
-        download_url = data.get("data", {}).get("exportInsight")
-        if not download_url:
-            raise GraphQLResponseError(f"exportInsight returned empty payload: {data}")
-        if isinstance(download_url, str) and download_url.startswith("/"):
-            download_url = f"{self.settings.origin}{download_url}"
-        if not isinstance(download_url, str):
-            raise GraphQLResponseError(f"Unexpected exportInsight payload: {data}")
+        rows.extend(parsed_rows)
 
-        response = self.session.get(download_url, timeout=self.settings.timeout)
-        if not response.ok:
-            raise GraphQLHTTPError(
-                f"Export download failed with HTTP {response.status_code}: {response.text[:500]}"
-            )
-        return response.content
+    deduped_rows = dedupe_export_rows(rows)
+    LOGGER.info(
+        "EXPORT day chunk deduped total | from=%s | to=%s | rows_before=%s | rows_after=%s | categories=%s | platforms=%s",
+        created_at_gte,
+        created_at_lte,
+        len(rows),
+        len(deduped_rows),
+        category_ids,
+        platform_ids,
+    )
+    return deduped_rows
 
     def export_insight_post_rows_by_day(
         self,
@@ -195,50 +198,83 @@ mutation ExportInsight($resource: String!, $filter: JSON, $ttl: String!, $appId:
         return dedupe_export_rows(rows)
 
     def export_insight_post_rows_by_category(
-        self,
-        *,
-        app_id: int,
-        created_at_gte: str | None,
-        created_at_lte: str | None,
-        category_ids: list[int],
-        platform_ids: list[int] | None,
-        channel_ids: list[int] | None,
-        metric_ids: list[int] | None,
-        metric_duration: int,
-        ttl: str = DEFAULT_EXPORT_TTL,
-        chunk_by_day: bool = False,
-    ) -> list[dict[str, str]]:
-        rows: list[dict[str, str]] = []
-        for category_id in category_ids:
-            if chunk_by_day:
-                if not created_at_gte or not created_at_lte:
-                    raise GraphQLResponseError("chunk_by_day requires created_at_gte and created_at_lte.")
-                category_rows = self.export_insight_post_rows_by_day(
-                    app_id=app_id,
-                    created_at_gte=created_at_gte,
-                    created_at_lte=created_at_lte,
-                    category_ids=[category_id],
-                    platform_ids=platform_ids,
-                    channel_ids=channel_ids,
-                    metric_ids=metric_ids,
-                    metric_duration=metric_duration,
-                    ttl=ttl,
-                )
-            else:
-                csv_bytes = self.export_insight_post_csv(
-                    app_id=app_id,
-                    created_at_gte=created_at_gte,
-                    created_at_lte=created_at_lte,
-                    category_ids=[category_id],
-                    platform_ids=platform_ids,
-                    channel_ids=channel_ids,
-                    metric_ids=metric_ids,
-                    metric_duration=metric_duration,
-                    ttl=ttl,
-                )
-                category_rows = parse_export_csv(csv_bytes)
-            rows.extend(category_rows)
-        return dedupe_export_rows(rows)
+    self,
+    *,
+    app_id: int,
+    created_at_gte: str | None,
+    created_at_lte: str | None,
+    category_ids: list[int],
+    platform_ids: list[int] | None,
+    channel_ids: list[int] | None,
+    metric_ids: list[int] | None,
+    metric_duration: int,
+    ttl: str = DEFAULT_EXPORT_TTL,
+    chunk_by_day: bool = False,
+) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+
+    LOGGER.info(
+        "EXPORT by category start | from=%s | to=%s | category_ids=%s | platform_ids=%s | chunk_by_day=%s",
+        created_at_gte,
+        created_at_lte,
+        category_ids,
+        platform_ids,
+        chunk_by_day,
+    )
+
+    for category_id in category_ids:
+        LOGGER.info(
+            "EXPORT category chunk start | category_id=%s | from=%s | to=%s | platforms=%s",
+            category_id,
+            created_at_gte,
+            created_at_lte,
+            platform_ids,
+        )
+
+        if chunk_by_day:
+            if not created_at_gte or not created_at_lte:
+                raise GraphQLResponseError("chunk_by_day requires created_at_gte and created_at_lte.")
+
+            category_rows = self.export_insight_post_rows_by_day(
+                app_id=app_id,
+                created_at_gte=created_at_gte,
+                created_at_lte=created_at_lte,
+                category_ids=[category_id],
+                platform_ids=platform_ids,
+                channel_ids=channel_ids,
+                metric_ids=metric_ids,
+                metric_duration=metric_duration,
+                ttl=ttl,
+            )
+        else:
+            csv_bytes = self.export_insight_post_csv(
+                app_id=app_id,
+                created_at_gte=created_at_gte,
+                created_at_lte=created_at_lte,
+                category_ids=[category_id],
+                platform_ids=platform_ids,
+                channel_ids=channel_ids,
+                metric_ids=metric_ids,
+                metric_duration=metric_duration,
+                ttl=ttl,
+            )
+            category_rows = parse_export_csv(csv_bytes)
+
+        LOGGER.info(
+            "EXPORT category chunk done | category_id=%s | rows=%s | platforms=%s",
+            category_id,
+            len(category_rows),
+            platform_ids,
+        )
+        rows.extend(category_rows)
+
+    deduped_rows = dedupe_export_rows(rows)
+    LOGGER.info(
+        "EXPORT by category done | total_rows_before=%s | total_rows_after=%s",
+        len(rows),
+        len(deduped_rows),
+    )
+    return deduped_rows
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self.session.post(
