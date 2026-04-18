@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import sys
 
+from app.pipeline import build_configured_reports, build_store_from_export
 from .analysis import build_report
 from .config import DEFAULT_APP_ID, DEFAULT_PER_PAGE, Settings
 from .display import print_posts
@@ -129,6 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save-raw", type=Path, help="Optional path to save raw API JSON.")
     parser.add_argument("--save-export", type=Path, help="Optional path to save exported CSV bytes.")
     parser.add_argument("--load-export", type=Path, help="Load a previously saved export CSV for analyze-only mode.")
+    parser.add_argument("--save-store", type=Path, help="Optional path to save normalized SQLite store.")
+    parser.add_argument("--load-store", type=Path, help="Load a previously built normalized SQLite store.")
+    parser.add_argument("--build-master-store", action="store_true", help="Build the normalized SQLite data layer from an export CSV.")
+    parser.add_argument("--build-configured-reports", action="store_true", help="Build config-driven report packages from SQLite.")
+    parser.add_argument("--groups-config", type=Path, default=Path("config/groups.json"), help="Groups config JSON path.")
+    parser.add_argument("--reports-config", type=Path, default=Path("config/reports.json"), help="Reports config JSON path.")
+    parser.add_argument("--campaigns-config", type=Path, default=Path("config/campaigns.json"), help="Campaigns config JSON path.")
     parser.add_argument("--save-report", type=Path, help="Optional path to save report JSON.")
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging.")
     parser.add_argument("--log-file", type=Path, help="Optional path to write runtime logs.")
@@ -216,11 +224,16 @@ def main() -> int:
     if args.seatalk_employee_code:
         settings.seatalk_employee_code = args.seatalk_employee_code
 
-    if settings.app_id <= 0 and not args.analyze_only:
+    local_only_mode = args.analyze_only or args.build_master_store or args.build_configured_reports
+    if settings.app_id <= 0 and not local_only_mode:
         parser.exit(status=1, message="datasocial error: appId is required.\n")
 
     if args.fetch_only and args.analyze_only:
         parser.exit(status=1, message="datasocial error: choose only one of --fetch-only or --analyze-only.\n")
+    if args.build_master_store and not args.load_export:
+        parser.exit(status=1, message="datasocial error: --build-master-store requires --load-export.\n")
+    if args.build_configured_reports and not args.load_store:
+        parser.exit(status=1, message="datasocial error: --build-configured-reports requires --load-store.\n")
 
     if not args.created_at_gte or not args.created_at_lte:
         auto_window = build_date_window(
@@ -251,6 +264,44 @@ def main() -> int:
             args.report_timezone,
             args.report_mode,
         )
+
+        if args.build_master_store:
+            update_status(status, "build_master_store", load_export=str(args.load_export), save_store=str(args.save_store))
+            write_status(args.status_file, status)
+            summary = build_store_from_export(
+                args.load_export,
+                args.save_store,
+                timezone_name=args.report_timezone,
+            )
+            if args.save_report:
+                args.save_report.parent.mkdir(parents=True, exist_ok=True)
+                args.save_report.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_status(status, "completed", exit_code=0, store_summary=summary)
+            write_status(args.status_file, status)
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+            return 0
+
+        if args.build_configured_reports:
+            update_status(status, "build_configured_reports", load_store=str(args.load_store))
+            write_status(args.status_file, status)
+            payload = build_configured_reports(
+                args.load_store,
+                groups_path=args.groups_config,
+                reports_path=args.reports_config,
+                campaigns_path=args.campaigns_config,
+                timezone_name=args.report_timezone,
+                mode=args.report_mode,
+                send=args.send_seatalk,
+                seatalk_app_id=settings.seatalk_app_id,
+                seatalk_app_secret=settings.seatalk_app_secret,
+            )
+            if args.save_report:
+                args.save_report.parent.mkdir(parents=True, exist_ok=True)
+                args.save_report.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            update_status(status, "completed", exit_code=0, package_count=payload.get("packageCount", 0))
+            write_status(args.status_file, status)
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
 
         if args.analyze_only:
             if not args.load_export:

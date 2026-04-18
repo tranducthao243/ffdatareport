@@ -36,7 +36,15 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run FFVN daily fetch
-        run: python -m datasocial --preset ffvn_daily --fetch-only
+        run: python -m datasocial --preset ffvn_master_daily --fetch-only
+
+      - name: Build normalized SQLite store
+        run: |
+          python -m datasocial \
+            --build-master-store \
+            --load-export outputs/ffvn_master_latest.csv \
+            --save-store outputs/ffvn_master.sqlite \
+            --report-timezone Asia/Ho_Chi_Minh
 
       - name: Build job summary
         if: always()
@@ -46,7 +54,8 @@ jobs:
             echo "# FFVN Daily Fetch"
             echo
             echo "- Trigger mode: \`workflow_dispatch\`"
-            echo "- Output CSV: \`outputs/ffvn_daily_latest.csv\`"
+            echo "- Output CSV: \`outputs/ffvn_master_latest.csv\`"
+            echo "- Output SQLite: \`outputs/ffvn_master.sqlite\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload fetch artifact
@@ -54,5 +63,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-fetch-latest
-          path: outputs/ffvn_daily_latest.csv
+          path: |
+            outputs/ffvn_master_latest.csv
+            outputs/ffvn_master.sqlite
           if-no-files-found: warn

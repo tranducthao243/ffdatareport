@@ -1,130 +1,141 @@
-# Datasocial
+# ffdatareport
 
-`datasocial` is a private reporting pipeline for Garena Social Data:
+`ffdatareport` đang được nâng cấp thành **Data Master v1** cho Seatalk reporting.
 
-- fetches export data from the private GraphQL backend
-- normalizes rows into a reporting model
-- builds modular FFVN KOL reports
-- sends compact summaries to SeaTalk
+Mục tiêu của repo:
 
-## Core layers
+- giữ nguyên fetch engine từ Social Data
+- chuẩn hóa raw CSV thành dữ liệu ổn định hơn
+- phân tích nhiều loại báo cáo từ cùng một dataset
+- gửi nhiều gói báo cáo khác nhau tới nhiều group Seatalk theo config
 
-- [datasocial/fetcher.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/fetcher.py): GraphQL session + export fetch
-- [datasocial/normalize.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/normalize.py): export row normalization
-- [datasocial/report_engine.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/report_engine.py): modular analytics engine
-- [datasocial/formatter.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/formatter.py): console + SeaTalk formatting
-- [datasocial/seatalk.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/seatalk.py): SeaTalk auth and delivery
-- [datasocial/cli.py](C:/Users/admin/OneDrive/Documents/datatool/datasocial/cli.py): CLI orchestration
-- [presets/ffvn_daily.json](C:/Users/admin/OneDrive/Documents/datatool/presets/ffvn_daily.json): FFVN daily preset
+## Kiến trúc phase 1
 
-## Setup
+Phase 1 giữ fetch engine hiện tại và thêm một lớp dữ liệu ở sau fetch:
 
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+```text
+Social Data fetch CSV
+-> normalize/store (SQLite)
+-> analyze (TOPA-TOPF)
+-> report builders (SO1, SO2, TOPD, TOPF)
+-> seatalk payload + sender
 ```
 
-## Test
+Các module mới:
+
+- [normalize/store.py](C:/Users/admin/OneDrive/Documents/New%20project/datatool/normalize/store.py)
+- [analyze/](C:/Users/admin/OneDrive/Documents/New%20project/datatool/analyze)
+- [report/](C:/Users/admin/OneDrive/Documents/New%20project/datatool/report)
+- [seatalk/](C:/Users/admin/OneDrive/Documents/New%20project/datatool/seatalk)
+- [app/pipeline.py](C:/Users/admin/OneDrive/Documents/New%20project/datatool/app/pipeline.py)
+- [config/groups.json](C:/Users/admin/OneDrive/Documents/New%20project/datatool/config/groups.json)
+- [config/reports.json](C:/Users/admin/OneDrive/Documents/New%20project/datatool/config/reports.json)
+- [config/campaigns.json](C:/Users/admin/OneDrive/Documents/New%20project/datatool/config/campaigns.json)
+
+Fetch engine cũ vẫn ở:
+
+- [datasocial/fetcher.py](C:/Users/admin/OneDrive/Documents/New%20project/datatool/datasocial/fetcher.py)
+- [datasocial/exporter.py](C:/Users/admin/OneDrive/Documents/New%20project/datatool/datasocial/exporter.py)
+- [datasocial/cli.py](C:/Users/admin/OneDrive/Documents/New%20project/datatool/datasocial/cli.py)
+
+## Dữ liệu phase 1
+
+Business scope mặc định:
+
+- KOL categories: `14, 22, 23, 24`
+- Official category: `13`
+- KOL platforms: TikTok, YouTube
+- Official platforms: TikTok, YouTube, Facebook
+- whitelist hashtag KOL:
+  - `freefire`
+  - `nhasangtaofreefire`
+  - `ff`
+  - `garena`
+
+Preset fetch mới cho Data Master:
+
+- [presets/ffvn_master_daily.json](C:/Users/admin/OneDrive/Documents/New%20project/datatool/presets/ffvn_master_daily.json)
+
+Preset này fetch rộng hơn preset daily cũ để đủ dữ liệu cho:
+
+- KOL report
+- campaign report
+- official report
+
+## Analyzer codes
+
+- `TOPA`: Top 5 TikTok + YouTube video nhiều view nhất trong rolling 1-2 ngày, có whitelist hashtag
+- `TOPB`: Top 5 TikTok + YouTube video nhiều view nhất trong 7 ngày, có whitelist hashtag
+- `TOPC`: Top 5 KOL channels 7 ngày theo total view
+- `TOPD`: Báo cáo campaign theo `config/campaigns.json`
+- `TOPE`: Tổng view + tổng clip toàn bộ KOL content 7 ngày
+- `TOPF`: Báo cáo official category `13`
+
+## Report packages
+
+- `SO1`: `TOPA + TOPB + TOPC + TOPE`
+- `SO2`: `TOPA + TOPB + TOPC`
+- `TOPD_REPORT`: package campaign
+- `TOPF_REPORT`: package official
+
+## Local commands
+
+### 1. Fetch raw CSV bằng engine hiện tại
 
 ```powershell
-python -m unittest tests.test_datasocial_parser tests.test_datasocial_analysis tests.test_datasocial_exporter tests.test_datasocial_seatalk
-python -m datasocial --help
+python -m datasocial --preset ffvn_master_daily --fetch-only
 ```
 
-## Daily FFVN preset
-
-The FFVN preset already includes:
-
-- app: `ffvn`
-- export flow
-- split fetch by category and day
-- tracked categories: `14, 22, 23, 24`
-- tracked platforms: `0, 2`
-- hashtags: `#freefire`, `#nhasangtaofreefire`
-- event tags kept as future campaign metadata
-- report mode: `complete_previous_day`
-- timezone: `Asia/Ho_Chi_Minh`
-- default output files:
-  - `outputs/ffvn_daily_latest.csv`
-  - `outputs/ffvn_daily_latest.json`
-
-### Short daily command
+### 2. Build SQLite normalized store từ CSV
 
 ```powershell
-python -m datasocial --preset ffvn_daily --send-seatalk
+python -m datasocial --build-master-store --load-export outputs\ffvn_master_latest.csv --save-store outputs\ffvn_master.sqlite
 ```
 
-Equivalent local script:
+### 3. Build config-driven report packages từ SQLite
 
 ```powershell
-.\scripts\run_ffvn_daily.ps1
+python -m datasocial --build-configured-reports --load-store outputs\ffvn_master.sqlite --save-report outputs\ffvn_master_reports.json
 ```
 
-## Analyze an existing export
+### 4. Build và gửi nhiều package qua Seatalk theo config
 
 ```powershell
-python -m datasocial --preset ffvn_daily --analyze-only --load-export outputs\export_chunked.csv
-```
-
-## Dynamic windows
-
-If you do not pass explicit dates, `datasocial` computes them automatically in `Asia/Ho_Chi_Minh`.
-
-Supported fetch windows:
-
-- `1D`
-- `4D`
-- `7D`
-- `30D`
-
-Supported modes:
-
-- `complete_previous_day`
-- `today_so_far`
-
-Example:
-
-```powershell
-python -m datasocial --preset ffvn_daily --fetch-window 30D --report-mode today_so_far --send-seatalk
+python -m datasocial --build-configured-reports --load-store outputs\ffvn_master.sqlite --save-report outputs\ffvn_master_reports.json --send-seatalk
 ```
 
 ## GitHub Actions
 
-Workflow scaffold:
+Workflow production vẫn giữ cấu trúc cũ:
 
-- [.github/workflows/ffvn-daily-fetch.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-fetch.yml)
-- [.github/workflows/ffvn-daily-send.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-daily-send.yml)
-- [.github/workflows/ffvn-manual-control.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/ffvn-manual-control.yml)
-- [.github/workflows/seatalk-test-ping.yml](C:/Users/admin/OneDrive/Documents/datatool/.github/workflows/seatalk-test-ping.yml)
-- [docs/GITHUB_DEPLOYMENT.md](C:/Users/admin/OneDrive/Documents/datatool/docs/GITHUB_DEPLOYMENT.md)
-- [docs/ACTIONS_OPERATOR_GUIDE.md](C:/Users/admin/OneDrive/Documents/datatool/docs/ACTIONS_OPERATOR_GUIDE.md)
+- [ffvn-daily-fetch.yml](C:/Users/admin/OneDrive/Documents/New%20project/datatool/.github/workflows/ffvn-daily-fetch.yml)
+- [ffvn-daily-send.yml](C:/Users/admin/OneDrive/Documents/New%20project/datatool/.github/workflows/ffvn-daily-send.yml)
+- [ffvn-daily-publish-data.yml](C:/Users/admin/OneDrive/Documents/New%20project/datatool/.github/workflows/ffvn-daily-publish-data.yml)
 
-Required GitHub Secrets:
+Production model hiện tại:
+
+- App Script làm scheduler
+- GitHub Actions làm executor
+- fetch workflow tạo:
+  - `outputs/ffvn_master_latest.csv`
+  - `outputs/ffvn_master.sqlite`
+- send workflow đọc SQLite và gửi report package theo config
+
+## Required secrets
 
 - `DATASOCIAL_USESSION`
 - `SEATALK_APP_ID`
 - `SEATALK_APP_SECRET`
 - `SEATALK_GROUP_ID`
 
-Recommended production setup:
+Optional nếu tách thêm group:
 
-- private GitHub repo
-- Actions tab as the operator interface
-- `ffvn-reporting` GitHub Environment for production secrets
-- use Google Apps Script as the scheduler/trigger layer
-- let Apps Script call the fetch and send workflows through `workflow_dispatch`
-- use the manual control workflow for one-off runs
-- use the SeaTalk test ping workflow when you only want to validate bot delivery quickly
+- `SEATALK_CAMPAIGN_GROUP_ID`
+- `SEATALK_OFFICIAL_GROUP_ID`
 
-## Operator guide
+## Test
 
-If you or your teammates need a simple runbook for GitHub Actions usage, read:
-
-- [docs/ACTIONS_OPERATOR_GUIDE.md](C:/Users/admin/OneDrive/Documents/datatool/docs/ACTIONS_OPERATOR_GUIDE.md)
-
-## Notes
-
-- Social Data still relies on a valid `usession` cookie.
-- SeaTalk delivery is already working for group delivery.
-- Campaign KPI tracking is intentionally left as a future module after the GitHub/UI phase.
+```powershell
+python -m unittest tests.test_datasocial_parser tests.test_datasocial_analysis tests.test_datasocial_exporter tests.test_datasocial_seatalk tests.test_datasocial_presets tests.test_datamaster_phase1
+python -m datasocial --help
+```

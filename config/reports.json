@@ -1,0 +1,20 @@
+{
+  "reports": {
+    "SO1": {
+      "title": "SO1 - Báo cáo tổng hợp",
+      "sections": ["TOPA", "TOPB", "TOPC", "TOPE"]
+    },
+    "SO2": {
+      "title": "SO2 - Báo cáo rút gọn",
+      "sections": ["TOPA", "TOPB", "TOPC"]
+    },
+    "TOPD_REPORT": {
+      "title": "TOPD - Báo cáo campaign",
+      "sections": ["TOPD"]
+    },
+    "TOPF_REPORT": {
+      "title": "TOPF - Báo cáo Official",
+      "sections": ["TOPF"]
+    }
+  }
+}

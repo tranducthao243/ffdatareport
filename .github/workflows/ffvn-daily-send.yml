@@ -20,6 +20,8 @@ jobs:
       SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
       SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
       SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
+      SEATALK_CAMPAIGN_GROUP_ID: ${{ secrets.SEATALK_CAMPAIGN_GROUP_ID }}
+      SEATALK_OFFICIAL_GROUP_ID: ${{ secrets.SEATALK_OFFICIAL_GROUP_ID }}
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest
@@ -87,12 +89,13 @@ jobs:
               zf.extractall("outputs")
           PY
 
-      - name: Build and send report from fetched CSV
+      - name: Build and send configured reports
         run: |
           python -m datasocial \
-            --preset ffvn_daily \
-            --analyze-only \
-            --load-export outputs/ffvn_daily_latest.csv \
+            --preset ffvn_master_daily \
+            --build-configured-reports \
+            --load-store outputs/ffvn_master.sqlite \
+            --save-report outputs/ffvn_master_reports.json \
             --send-seatalk
 
       - name: Build job summary
@@ -103,22 +106,24 @@ jobs:
           import json
           from pathlib import Path
 
-          path = Path("outputs/ffvn_daily_latest.json")
+          path = Path("outputs/ffvn_master_reports.json")
           summary_path = Path("${GITHUB_STEP_SUMMARY}")
           if not path.exists():
               summary_path.write_text("FFVN daily send did not produce a JSON artifact.\n", encoding="utf-8")
               raise SystemExit(0)
 
           report = json.loads(path.read_text(encoding="utf-8"))
-          overview = report.get("modules", {}).get("overview7D", {})
           lines = [
               "# FFVN Daily Send",
               "",
               "- Trigger mode: `workflow_dispatch`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
-              f"- Total views 7D: `{overview.get('totalView', 0)}`",
-              f"- Total clips 7D: `{overview.get('totalPosts', 0)}`",
+              f"- Package count: `{report.get('packageCount', 0)}`",
           ]
+          for item in report.get("sendResults", []):
+              lines.append(
+                  f"- {item.get('groupName', '-')}: `{item.get('status', '-')}`"
+              )
           summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
@@ -127,5 +132,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-send-latest
-          path: outputs/ffvn_daily_latest.json
+          path: outputs/ffvn_master_reports.json
           if-no-files-found: warn

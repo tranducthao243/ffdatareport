@@ -69,4 +69,5 @@ def apply_preset_defaults(args: Any, preset: Preset) -> None:
         args.save_export = Path("outputs") / f"{output_prefix}_latest.csv"
     if getattr(args, "save_report", None) is None and (getattr(args, "report", False) or getattr(args, "analyze_only", False)):
         args.save_report = Path("outputs") / f"{output_prefix}_latest.json"
-
+    if getattr(args, "save_store", None) is None and data.get("output_prefix"):
+        args.save_store = Path("outputs") / f"{output_prefix}.sqlite"

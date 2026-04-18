@@ -54,8 +54,13 @@ def parse_export_csv(csv_bytes: bytes) -> list[dict[str, str]]:
 def export_rows_to_csv_bytes(rows: list[dict[str, Any]]) -> bytes:
     if not rows:
         return b""
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in fieldnames:
+                fieldnames.append(key)
     output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=list(rows[0].keys()))
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(rows)
     return output.getvalue().encode("utf-8-sig")

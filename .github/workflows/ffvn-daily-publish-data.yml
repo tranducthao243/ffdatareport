@@ -27,7 +27,7 @@ jobs:
       REPO: ${{ github.repository }}
       SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
       TARGET_ARTIFACT_NAME: ffvn-daily-fetch-latest
-      TARGET_CSV_PATH: outputs/ffvn_daily_latest.csv
+      TARGET_CSV_PATH: outputs/ffvn_master_latest.csv
       ALPHA_API_BASE_URL: ${{ secrets.ALPHA_API_BASE_URL }}
       ALPHA_API_KEY: ${{ secrets.ALPHA_API_KEY }}
       ALPHA_EXPERT_ID: ${{ secrets.ALPHA_EXPERT_ID }}
