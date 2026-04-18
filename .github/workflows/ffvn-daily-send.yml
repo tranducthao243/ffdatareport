@@ -81,12 +81,18 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             "/repos/${REPO}/actions/artifacts/${artifact_id}/zip" > fetch_artifact.zip
 
-          mkdir -p outputs
           python - <<'PY'
+          from pathlib import Path
           import zipfile
 
           with zipfile.ZipFile("fetch_artifact.zip", "r") as zf:
-              zf.extractall("outputs")
+              zf.extractall(".")
+
+          expected = Path("outputs/ffvn_master.sqlite")
+          if not expected.exists():
+              raise SystemExit(
+                  f"Expected normalized store at {expected}, but the fetch artifact did not contain it."
+              )
           PY
 
       - name: Build and send configured reports

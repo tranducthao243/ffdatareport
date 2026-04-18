@@ -6,6 +6,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable
 
+from datasocial.exceptions import DatasocialError
 from datasocial.timewindows import DEFAULT_REPORT_TZ, build_date_window, get_report_timezone
 
 
@@ -38,8 +39,23 @@ class StorePost:
 
 
 def load_posts(db_path: Path) -> list[StorePost]:
+    if not db_path.exists():
+        raise DatasocialError(
+            f"Normalized SQLite store not found: {db_path}. Run FFVN Daily Fetch (Scheduled) first."
+        )
+
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
+        tables = {
+            row["name"]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if "posts" not in tables or "post_hashtags" not in tables:
+            raise DatasocialError(
+                f"Invalid normalized SQLite store at {db_path}: required tables are missing."
+            )
         post_rows = conn.execute(
             """
             SELECT
