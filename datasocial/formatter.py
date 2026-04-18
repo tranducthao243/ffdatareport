@@ -22,27 +22,27 @@ def render_report(report: dict) -> str:
         ),
         f"summary: {json.dumps(summary, ensure_ascii=False)}",
         "",
-        "Top Content By Platform (top 5 clips by views in the last 1 day):",
+        "Top Content By Platform (top 5 clips by views in the current rolling 1-2 day window, including today when available):",
     ]
     for platform in ("tiktok", "youtube"):
         lines.append(f"  {platform}:")
         lines.extend(render_content_block(modules["topContentByPlatform"]["1D"][platform], indent="    "))
 
-    lines.extend(["", "Trend Videos 7D (clips with unusually high views vs the same channel in the last 7 days):"])
+    lines.extend(["", "Trend Videos 7D (clips with unusually high views vs the same channel in the current 7-day window, including today when available):"])
     lines.extend(render_trend_block(modules["trendVideos7D"]))
 
-    lines.extend(["", "Daily Views 7D (highest total system views in the last 7 days, across all fetched KOL data):"])
+    lines.extend(["", "Daily Views 7D (highest total system views in the current 7-day window, across all fetched KOL data):"])
     lines.extend(render_daily_summary(modules["dailyViews7D"]))
 
-    lines.extend(["", "Daily Post Count 7D (highest and lowest total published clips in the last 7 days):"])
+    lines.extend(["", "Daily Post Count 7D (highest and lowest total published clips in the current 7-day window):"])
     lines.extend(render_daily_post_summary(modules["dailyPostCount7D"]))
 
-    lines.extend(["", "Top KOLs 7D (top 5 channels by total views in the last 7 days):"])
+    lines.extend(["", "Top KOLs 7D (top 5 channels by total views in the current 7-day window):"])
     for platform in ("tiktok", "youtube"):
         lines.append(f"  {platform}:")
         lines.extend(render_kol_block(modules["topKols7D"][platform], indent="    "))
 
-    lines.extend(["", "Overview 7D (overall system totals in the last 7 days, no hashtag filter):"])
+    lines.extend(["", "Overview 7D (overall system totals in the current 7-day window, no hashtag filter):"])
     lines.extend(render_overview(modules["overview7D"]))
 
     lines.extend(["", "Campaign Tracking:"])
@@ -62,18 +62,18 @@ def render_seatalk_report(report: dict, *, title: str = "Datasocial Report") -> 
         f"Daily FFVN creator performance report for `{meta['fetchWindow']['start_date']} -> {meta['fetchWindow']['end_date']}`.",
         "",
         "**Top Content 1D**",
-        "_Top 5 clips by views in the last 1 day._",
+        "_Top 5 clips by views in the current rolling 1-2 day window, including today when available._",
     ]
     lines.extend(render_seatalk_platform_block(modules["topContentByPlatform"]["1D"]))
-    lines.extend(["", "**Trend Videos 7D**", "_Clips with unusually high views vs the same channel in the last 7 days._"])
+    lines.extend(["", "**Trend Videos 7D**", "_Clips with unusually high views vs the same channel in the current 7-day window, including today when available._"])
     lines.extend(render_seatalk_trend_block(modules["trendVideos7D"]))
-    lines.extend(["", "**Daily Views 7D**", "_Highest total system views in the last 7 days across all fetched KOL data._"])
+    lines.extend(["", "**Daily Views 7D**", "_Highest total system views in the current 7-day window across all fetched KOL data._"])
     lines.extend(render_seatalk_daily_summary(modules["dailyViews7D"], suffix="views"))
-    lines.extend(["", "**Daily Posts 7D**", "_Highest and lowest total published clips in the last 7 days._"])
+    lines.extend(["", "**Daily Posts 7D**", "_Highest and lowest total published clips in the current 7-day window._"])
     lines.extend(render_seatalk_daily_post_summary(modules["dailyPostCount7D"], suffix="posts"))
-    lines.extend(["", "**Top KOLs 7D**", "_Top 5 channels by total views in the last 7 days._"])
+    lines.extend(["", "**Top KOLs 7D**", "_Top 5 channels by total views in the current 7-day window._"])
     lines.extend(render_seatalk_kol_block(modules["topKols7D"]))
-    lines.extend(["", "**Overview 7D**", "_Overall system totals in the last 7 days, without hashtag filtering._"])
+    lines.extend(["", "**Overview 7D**", "_Overall system totals in the current 7-day window, without hashtag filtering._"])
     lines.extend(render_seatalk_overview(modules["overview7D"]))
     return "\n".join(lines)
 
