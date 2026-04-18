@@ -8,7 +8,7 @@
   "chunk_by_category": true,
   "chunk_by_day": true,
   "fetch_window": "7D",
-  "report_mode": "complete_previous_day",
+  "report_mode": "today_so_far",
   "report_timezone": "Asia/Ho_Chi_Minh",
   "category_ids": [14, 22, 23, 24],
   "platform_ids": [0, 2],
