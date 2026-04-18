@@ -48,12 +48,21 @@ jobs:
 
           python - <<'PY'
           import json
+          import os
+          import subprocess
+          import zipfile
           from datetime import datetime, timedelta, timezone
           from pathlib import Path
 
           artifacts = json.loads(Path("artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
           cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
           target_name = "ffvn-daily-fetch-latest"
+          repo = os.environ["REPO"]
+          usable_files = {
+              "outputs/ffvn_master.sqlite",
+              "outputs/ffvn_master_latest.csv",
+              "outputs/ffvn_daily_latest.csv",
+          }
 
           candidates = []
           for artifact in artifacts:
@@ -72,21 +81,40 @@ jobs:
               )
 
           candidates.sort(reverse=True)
-          Path("artifact_id.txt").write_text(str(candidates[0][1]), encoding="utf-8")
-          PY
+          selected_id = None
+          selected_zip = None
+          for _, artifact_id in candidates:
+              zip_path = Path(f"artifact_{artifact_id}.zip")
+              with zip_path.open("wb") as handle:
+                  result = subprocess.run(
+                      [
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          f"/repos/{repo}/actions/artifacts/{artifact_id}/zip",
+                      ],
+                      stdout=handle,
+                      stderr=subprocess.PIPE,
+                      text=False,
+                  )
+              if result.returncode != 0:
+                  continue
 
-          artifact_id="$(cat artifact_id.txt)"
+              with zipfile.ZipFile(zip_path, "r") as zf:
+                  names = set(zf.namelist())
+                  if names & usable_files:
+                      selected_id = artifact_id
+                      selected_zip = zip_path
+                      zf.extractall(".")
+                      break
 
-          gh api \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${REPO}/actions/artifacts/${artifact_id}/zip" > fetch_artifact.zip
+          if selected_id is None or selected_zip is None:
+              raise SystemExit(
+                  "No recent fetch artifact contained a usable CSV or SQLite store. Run FFVN Daily Fetch (Scheduled) again."
+              )
 
-          python - <<'PY'
-          from pathlib import Path
-          import zipfile
-
-          with zipfile.ZipFile("fetch_artifact.zip", "r") as zf:
-              zf.extractall(".")
+          Path("artifact_id.txt").write_text(str(selected_id), encoding="utf-8")
           PY
 
       - name: Ensure normalized SQLite store
