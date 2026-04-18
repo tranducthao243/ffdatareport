@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Any
 
 import requests
@@ -18,6 +19,10 @@ from .exporter import (
 from .graphql import LIST_POST_QUERY, build_list_post_variables
 
 LOGGER = logging.getLogger("datasocial")
+
+EXPORT_DOWNLOAD_RETRY_STATUSES = {502, 503, 504}
+EXPORT_DOWNLOAD_MAX_ATTEMPTS = 3
+EXPORT_DOWNLOAD_BASE_DELAY_SECONDS = 2.0
 
 
 class GraphQLClient:
@@ -260,42 +265,13 @@ class GraphQLClient:
             platform_ids,
         )
 
-        LOGGER.info(
-            "EXPORT chunk downloading CSV | timeout=%s | from=%s | to=%s | categories=%s | platforms=%s",
-            self.settings.timeout,
-            created_at_gte,
-            created_at_lte,
-            category_ids,
-            platform_ids,
+        return self._download_export_csv_with_retry(
+            download_url,
+            created_at_gte=created_at_gte,
+            created_at_lte=created_at_lte,
+            category_ids=category_ids,
+            platform_ids=platform_ids,
         )
-
-        response = self.session.get(download_url, timeout=self.settings.timeout)
-
-        LOGGER.info(
-            "EXPORT chunk download response | status=%s | bytes=%s | from=%s | to=%s | categories=%s | platforms=%s",
-            response.status_code,
-            len(response.content or b""),
-            created_at_gte,
-            created_at_lte,
-            category_ids,
-            platform_ids,
-        )
-
-        if not response.ok:
-            LOGGER.error(
-                "EXPORT chunk download failed | status=%s | from=%s | to=%s | categories=%s | platforms=%s | body_preview=%s",
-                response.status_code,
-                created_at_gte,
-                created_at_lte,
-                category_ids,
-                platform_ids,
-                response.text[:500],
-            )
-            raise GraphQLHTTPError(
-                f"Export download failed with HTTP {response.status_code}: {response.text[:500]}"
-            )
-
-        return response.content
 
     def export_insight_post_rows_by_day_and_platform(
         self,
@@ -340,6 +316,7 @@ class GraphQLClient:
                 )
 
                 parsed_rows = parse_export_csv(csv_bytes)
+                parsed_rows = self._annotate_export_rows(parsed_rows, category_ids=category_ids)
 
                 LOGGER.info(
                     "EXPORT day+platform chunk parsed | day_start=%s | day_end=%s | row_count=%s | categories=%s | platforms=%s",
@@ -379,7 +356,6 @@ class GraphQLClient:
         metric_duration: int,
         ttl: str = DEFAULT_EXPORT_TTL,
     ) -> list[dict[str, str]]:
-        # Giữ lại hàm cũ để tương thích, nhưng thực chất chuyển sang tách theo platform luôn.
         return self.export_insight_post_rows_by_day_and_platform(
             app_id=app_id,
             created_at_gte=created_at_gte,
@@ -468,7 +444,10 @@ class GraphQLClient:
                             metric_duration=metric_duration,
                             ttl=ttl,
                         )
-                        category_rows.extend(parse_export_csv(csv_bytes))
+                        parsed_rows = parse_export_csv(csv_bytes)
+                        category_rows.extend(
+                            self._annotate_export_rows(parsed_rows, category_ids=[category_id])
+                        )
                 else:
                     csv_bytes = self.export_insight_post_csv(
                         app_id=app_id,
@@ -482,6 +461,10 @@ class GraphQLClient:
                         ttl=ttl,
                     )
                     category_rows = parse_export_csv(csv_bytes)
+                    category_rows = self._annotate_export_rows(
+                        category_rows,
+                        category_ids=[category_id],
+                    )
 
             LOGGER.info(
                 "EXPORT category chunk done | category_id=%s | rows=%s | platforms=%s",
@@ -501,6 +484,129 @@ class GraphQLClient:
         )
 
         return deduped_rows
+
+    @staticmethod
+    def _annotate_export_rows(
+        rows: list[dict[str, str]],
+        *,
+        category_ids: list[int] | None,
+    ) -> list[dict[str, str]]:
+        if not category_ids or len(category_ids) != 1:
+            return rows
+        category_id = str(category_ids[0])
+        for row in rows:
+            row.setdefault("__category_id", category_id)
+        return rows
+
+    def _download_export_csv_with_retry(
+        self,
+        download_url: str,
+        *,
+        created_at_gte: str | None,
+        created_at_lte: str | None,
+        category_ids: list[int] | None,
+        platform_ids: list[int] | None,
+    ) -> bytes:
+        last_error: Exception | None = None
+
+        for attempt in range(1, EXPORT_DOWNLOAD_MAX_ATTEMPTS + 1):
+            LOGGER.info(
+                "EXPORT chunk downloading CSV | timeout=%s | attempt=%s/%s | from=%s | to=%s | categories=%s | platforms=%s",
+                self.settings.timeout,
+                attempt,
+                EXPORT_DOWNLOAD_MAX_ATTEMPTS,
+                created_at_gte,
+                created_at_lte,
+                category_ids,
+                platform_ids,
+            )
+
+            try:
+                response = self.session.get(download_url, timeout=self.settings.timeout)
+            except requests.RequestException as exc:
+                last_error = exc
+                if attempt >= EXPORT_DOWNLOAD_MAX_ATTEMPTS:
+                    LOGGER.error(
+                        "EXPORT chunk download request exception | attempt=%s/%s | from=%s | to=%s | categories=%s | platforms=%s | error=%s",
+                        attempt,
+                        EXPORT_DOWNLOAD_MAX_ATTEMPTS,
+                        created_at_gte,
+                        created_at_lte,
+                        category_ids,
+                        platform_ids,
+                        exc,
+                    )
+                    break
+
+                delay_seconds = EXPORT_DOWNLOAD_BASE_DELAY_SECONDS * attempt
+                LOGGER.warning(
+                    "EXPORT chunk download request exception, retrying | attempt=%s/%s | delay=%.1fs | from=%s | to=%s | categories=%s | platforms=%s | error=%s",
+                    attempt,
+                    EXPORT_DOWNLOAD_MAX_ATTEMPTS,
+                    delay_seconds,
+                    created_at_gte,
+                    created_at_lte,
+                    category_ids,
+                    platform_ids,
+                    exc,
+                )
+                time.sleep(delay_seconds)
+                continue
+
+            LOGGER.info(
+                "EXPORT chunk download response | status=%s | bytes=%s | from=%s | to=%s | categories=%s | platforms=%s",
+                response.status_code,
+                len(response.content or b""),
+                created_at_gte,
+                created_at_lte,
+                category_ids,
+                platform_ids,
+            )
+
+            if response.ok:
+                return response.content
+
+            body_preview = response.text[:500]
+            last_error = GraphQLHTTPError(
+                f"Export download failed with HTTP {response.status_code}: {body_preview}"
+            )
+
+            if (
+                response.status_code not in EXPORT_DOWNLOAD_RETRY_STATUSES
+                or attempt >= EXPORT_DOWNLOAD_MAX_ATTEMPTS
+            ):
+                LOGGER.error(
+                    "EXPORT chunk download failed | status=%s | attempt=%s/%s | from=%s | to=%s | categories=%s | platforms=%s | body_preview=%s",
+                    response.status_code,
+                    attempt,
+                    EXPORT_DOWNLOAD_MAX_ATTEMPTS,
+                    created_at_gte,
+                    created_at_lte,
+                    category_ids,
+                    platform_ids,
+                    body_preview,
+                )
+                break
+
+            delay_seconds = EXPORT_DOWNLOAD_BASE_DELAY_SECONDS * attempt
+            LOGGER.warning(
+                "EXPORT chunk download got retryable status, retrying | status=%s | attempt=%s/%s | delay=%.1fs | from=%s | to=%s | categories=%s | platforms=%s",
+                response.status_code,
+                attempt,
+                EXPORT_DOWNLOAD_MAX_ATTEMPTS,
+                delay_seconds,
+                created_at_gte,
+                created_at_lte,
+                category_ids,
+                platform_ids,
+            )
+            time.sleep(delay_seconds)
+
+        if isinstance(last_error, GraphQLHTTPError):
+            raise last_error
+        if last_error is not None:
+            raise GraphQLHTTPError(f"Export download failed after retries: {last_error}")
+        raise GraphQLHTTPError("Export download failed after retries with unknown error.")
 
     def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
         operation_name = payload.get("operationName", "UnknownOperation")
