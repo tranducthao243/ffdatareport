@@ -47,7 +47,7 @@ concurrency:
 jobs:
   run-ffvn-report:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     environment: ffvn-reporting
     env:
       DATASOCIAL_GRAPHQL_ENDPOINT: https://socialdata.garena.vn/graphql
