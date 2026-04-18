@@ -25,14 +25,26 @@ def send_report_packages(
                 }
             )
             continue
-        client = build_seatalk_client(app_id=app_id, app_secret=app_secret, group_id=group_id)
-        client.send_text(build_text_payload(package["renderedText"]))
-        results.append(
-            {
-                "groupName": package["groupName"],
-                "reportCode": package["reportCode"],
-                "status": "sent",
-                "groupId": group_id,
-            }
-        )
+        try:
+            client = build_seatalk_client(app_id=app_id, app_secret=app_secret, group_id=group_id)
+            client.send_text(build_text_payload(package["renderedText"]))
+            results.append(
+                {
+                    "groupName": package["groupName"],
+                    "reportCode": package["reportCode"],
+                    "status": "sent",
+                    "groupId": group_id,
+                }
+            )
+        except Exception as exc:
+            results.append(
+                {
+                    "groupName": package["groupName"],
+                    "reportCode": package["reportCode"],
+                    "status": "failed",
+                    "groupId": group_id,
+                    "reason": type(exc).__name__,
+                    "message": str(exc),
+                }
+            )
     return results

@@ -13,14 +13,18 @@ def build_report_packages(
     groups_config: dict[str, Any],
     reports_config: dict[str, Any],
     campaigns_config: list[dict[str, Any]],
+    invalid_group_names: set[str] | None = None,
     mode: str,
     timezone_name: str,
     now: datetime | None = None,
 ) -> list[dict[str, Any]]:
     campaign_by_name = {item["name"]: item for item in campaigns_config}
     packages: list[dict[str, Any]] = []
+    invalid_group_names = invalid_group_names or set()
     for group in groups_config.get("groups", []):
         if not group.get("enabled", True):
+            continue
+        if group["name"] in invalid_group_names:
             continue
         report_code = group["report_code"]
         report_def = reports_config["reports"][report_code]
