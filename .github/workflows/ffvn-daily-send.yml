@@ -87,13 +87,32 @@ jobs:
 
           with zipfile.ZipFile("fetch_artifact.zip", "r") as zf:
               zf.extractall(".")
-
-          expected = Path("outputs/ffvn_master.sqlite")
-          if not expected.exists():
-              raise SystemExit(
-                  f"Expected normalized store at {expected}, but the fetch artifact did not contain it."
-              )
           PY
+
+      - name: Ensure normalized SQLite store
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f outputs/ffvn_master.sqlite ]]; then
+            echo "Normalized SQLite store already present."
+            exit 0
+          fi
+
+          if [[ -f outputs/ffvn_master_latest.csv ]]; then
+            export_csv="outputs/ffvn_master_latest.csv"
+          elif [[ -f outputs/ffvn_daily_latest.csv ]]; then
+            export_csv="outputs/ffvn_daily_latest.csv"
+          else
+            echo "Fetch artifact did not contain a usable CSV or SQLite store. Run FFVN Daily Fetch (Scheduled) again after updating the workflow."
+            exit 1
+          fi
+
+          python -m datasocial \
+            --build-master-store \
+            --load-export "${export_csv}" \
+            --save-store outputs/ffvn_master.sqlite \
+            --report-timezone Asia/Ho_Chi_Minh
 
       - name: Build and send configured reports
         run: |

@@ -638,11 +638,17 @@ class GraphQLClient:
         data = response.json()
 
         if data.get("errors"):
+            error_text = json.dumps(data["errors"], ensure_ascii=False)
             LOGGER.error(
                 "GRAPHQL logical errors | operation=%s | errors=%s",
                 operation_name,
                 data["errors"],
             )
+            if "Unauthorized" in error_text:
+                raise GraphQLResponseError(
+                    "Social Data returned Unauthorized. Check DATASOCIAL_USESSION in GitHub Actions secrets, "
+                    "especially the environment secret for 'ffvn-reporting', then rerun the workflow."
+                )
             raise GraphQLResponseError(str(data["errors"]))
 
         LOGGER.info("GRAPHQL done | operation=%s", operation_name)
