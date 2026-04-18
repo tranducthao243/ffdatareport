@@ -1,6 +1,6 @@
 {
   "name": "ffvn_master_daily",
-  "description": "Data Master fetch preset for FFVN KOL reporting. Official data stays disabled until Social Data export permission is available for category 13.",
+  "description": "Data Master fetch preset for FFVN KOL and Official reporting. Official data is fetched for TOPF only and remains isolated from KOL report sections.",
   "app_id": 2,
   "app_slug": "ffvn",
   "use_export": true,
@@ -10,8 +10,8 @@
   "fetch_window": "7D",
   "report_mode": "today_so_far",
   "report_timezone": "Asia/Ho_Chi_Minh",
-  "category_ids": [14, 22, 23, 24],
-  "platform_ids": [0, 2],
+  "category_ids": [13, 14, 22, 23, 24],
+  "platform_ids": [0, 1, 2],
   "metric_ids": [2, 61, 0, 1, 4],
   "metric_duration": 30,
   "output_prefix": "ffvn_master"
