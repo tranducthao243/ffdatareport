@@ -28,6 +28,8 @@ def validate_reporting_config(
     groups_config: dict[str, Any],
     reports_config: dict[str, Any],
     campaigns_config: list[dict[str, Any]],
+    *,
+    source_scope: dict[str, list[int]] | None = None,
 ) -> dict[str, Any]:
     errors: list[dict[str, str]] = []
     warnings: list[dict[str, str]] = []
@@ -80,6 +82,9 @@ def validate_reporting_config(
 
     seen_group_names: set[str] = set()
     invalid_group_names: set[str] = set()
+    blocked_group_names: set[str] = set()
+    available_category_ids = set(source_scope.get("category_ids", [])) if source_scope else set()
+    available_platform_ids = set(source_scope.get("platform_ids", [])) if source_scope else set()
 
     for index, group in enumerate(groups):
         name = str(group.get("name") or "").strip() or f"group_{index}"
@@ -203,6 +208,24 @@ def validate_reporting_config(
                     state["status"] = "invalid"
                     state["messages"].append("unknown_campaign_name")
 
+        if "TOPF" in sections and source_scope is not None:
+            official_category_ok = 13 in available_category_ids
+            official_platforms_ok = {0, 1, 2}.issubset(available_platform_ids)
+            if not official_category_ok or not official_platforms_ok:
+                warnings.append(
+                    {
+                        "code": "official_source_disabled",
+                        "groupName": name,
+                        "message": (
+                            f"Group '{name}' uses TOPF but the current fetch scope does not include full official data "
+                            "(requires category 13 and platforms 0,1,2). The package will be skipped."
+                        ),
+                    }
+                )
+                blocked_group_names.add(name)
+                state["status"] = "blocked"
+                state["messages"].append("official_source_disabled")
+
         if not state["resolvedGroupId"]:
             warnings.append(
                 {
@@ -220,6 +243,7 @@ def validate_reporting_config(
         "warnings": warnings,
         "groupStates": group_states,
         "invalidGroupNames": sorted(invalid_group_names),
+        "blockedGroupNames": sorted(blocked_group_names),
     }
 
 

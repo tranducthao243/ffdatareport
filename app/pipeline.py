@@ -34,6 +34,7 @@ def build_configured_reports(
     campaigns_path: Path,
     timezone_name: str,
     mode: str,
+    source_scope: dict[str, list[int]] | None = None,
     now: datetime | None = None,
     send: bool = False,
     seatalk_app_id: str = "",
@@ -42,7 +43,12 @@ def build_configured_reports(
     groups_config = load_json(groups_path)
     reports_config = load_json(reports_path)
     campaigns_config = load_json(campaigns_path)
-    validation = validate_reporting_config(groups_config, reports_config, campaigns_config)
+    validation = validate_reporting_config(
+        groups_config,
+        reports_config,
+        campaigns_config,
+        source_scope=source_scope,
+    )
     if validation["errors"]:
         raise DatasocialError(format_validation_errors(validation))
 
@@ -52,6 +58,7 @@ def build_configured_reports(
         reports_config=reports_config,
         campaigns_config=campaigns_config,
         invalid_group_names=set(validation["invalidGroupNames"]),
+        blocked_group_names=set(validation["blockedGroupNames"]),
         mode=mode,
         timezone_name=timezone_name,
         now=now,
@@ -85,6 +92,7 @@ def build_configured_reports(
     sent_count = sum(1 for item in send_results if item["status"] == "sent")
     skipped_count = sum(1 for item in send_results if item["status"] == "skipped")
     failed_count = sum(1 for item in send_results if item["status"] == "failed")
+    blocked_count = sum(1 for item in validation["groupStates"] if item["status"] == "blocked")
 
     return {
         "generatedAt": (now or datetime.now()).isoformat(),
@@ -99,6 +107,7 @@ def build_configured_reports(
         "summary": {
             "packagesBuilt": len(packages),
             "warnings": len(validation["warnings"]),
+            "blocked": blocked_count,
             "sent": sent_count,
             "skipped": skipped_count,
             "failed": failed_count,

@@ -190,6 +190,7 @@ jobs:
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Package count: `{report.get('packageCount', 0)}`",
               f"- Validation warnings: `{report.get('validation', {}).get('warningCount', 0)}`",
+              f"- Blocked: `{report.get('summary', {}).get('blocked', 0)}`",
               f"- Sent: `{report.get('summary', {}).get('sent', 0)}`",
               f"- Skipped: `{report.get('summary', {}).get('skipped', 0)}`",
               f"- Failed: `{report.get('summary', {}).get('failed', 0)}`",

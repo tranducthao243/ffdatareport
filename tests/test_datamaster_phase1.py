@@ -173,6 +173,7 @@ class DataMasterPhase1Tests(unittest.TestCase):
                 campaigns_path=campaigns_path,
                 timezone_name="Asia/Ho_Chi_Minh",
                 mode="complete_previous_day",
+                source_scope={"category_ids": [13, 14, 22], "platform_ids": [0, 1, 2]},
                 now=datetime(2026, 4, 18, 9, 0, 0),
                 send=False,
             )
@@ -264,11 +265,87 @@ class DataMasterPhase1Tests(unittest.TestCase):
                     campaigns_path=campaigns_path,
                     timezone_name="Asia/Ho_Chi_Minh",
                     mode="complete_previous_day",
+                    source_scope={"category_ids": [14], "platform_ids": [0, 2]},
                     now=datetime(2026, 4, 18, 9, 0, 0),
                     send=False,
                 )
 
             self.assertIn("missing campaigns", str(ctx.exception))
+
+    def test_topf_group_is_blocked_when_official_source_not_in_scope(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "KOL TikTok 1",
+                "__category_id": "14",
+                "Category": "Gameplay_Creator",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "TikTok A #freefire",
+                "Link": "https://www.tiktok.com/@tt/video/1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#freefire",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            groups_path = root / "groups.json"
+            reports_path = root / "reports.json"
+            campaigns_path = root / "campaigns.json"
+            groups_path.write_text(
+                json.dumps(
+                    {
+                        "groups": [
+                            {"name": "main", "enabled": True, "report_code": "SO1", "group_id": "g-main"},
+                            {"name": "official", "enabled": True, "report_code": "TOPF_REPORT", "group_id": "g-off"},
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reports_path.write_text(
+                json.dumps(
+                    {
+                        "reports": {
+                            "SO1": {"sections": ["TOPA", "TOPB", "TOPC", "TOPE"]},
+                            "TOPF_REPORT": {"sections": ["TOPF"]},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            campaigns_path.write_text("[]", encoding="utf-8")
+
+            payload = build_configured_reports(
+                db_path,
+                groups_path=groups_path,
+                reports_path=reports_path,
+                campaigns_path=campaigns_path,
+                timezone_name="Asia/Ho_Chi_Minh",
+                mode="complete_previous_day",
+                source_scope={"category_ids": [14, 22, 23, 24], "platform_ids": [0, 2]},
+                now=datetime(2026, 4, 18, 9, 0, 0),
+                send=False,
+            )
+
+            self.assertEqual(payload["packageCount"], 1)
+            self.assertEqual(payload["summary"]["blocked"], 1)
+            self.assertEqual(payload["validation"]["warningCount"], 1)
+            official_state = next(item for item in payload["validation"]["groupStates"] if item["groupName"] == "official")
+            self.assertEqual(official_state["status"], "blocked")
 
 
 if __name__ == "__main__":

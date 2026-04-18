@@ -291,6 +291,10 @@ def main() -> int:
                 campaigns_path=args.campaigns_config,
                 timezone_name=args.report_timezone,
                 mode=args.report_mode,
+                source_scope={
+                    "category_ids": list(args.category_ids or []),
+                    "platform_ids": list(args.platform_ids or []),
+                },
                 send=args.send_seatalk,
                 seatalk_app_id=settings.seatalk_app_id,
                 seatalk_app_secret=settings.seatalk_app_secret,
