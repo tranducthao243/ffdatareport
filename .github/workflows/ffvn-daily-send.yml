@@ -62,6 +62,9 @@ jobs:
               "outputs/ffvn_master.sqlite",
               "outputs/ffvn_master_latest.csv",
               "outputs/ffvn_daily_latest.csv",
+              "ffvn_master.sqlite",
+              "ffvn_master_latest.csv",
+              "ffvn_daily_latest.csv",
           }
 
           candidates = []
@@ -127,9 +130,23 @@ jobs:
             exit 0
           fi
 
+          mkdir -p outputs
+
+          if [[ -f ffvn_master.sqlite ]]; then
+            mv ffvn_master.sqlite outputs/ffvn_master.sqlite
+            echo "Moved normalized SQLite store into outputs/."
+            exit 0
+          fi
+
           if [[ -f outputs/ffvn_master_latest.csv ]]; then
             export_csv="outputs/ffvn_master_latest.csv"
+          elif [[ -f ffvn_master_latest.csv ]]; then
+            mv ffvn_master_latest.csv outputs/ffvn_master_latest.csv
+            export_csv="outputs/ffvn_master_latest.csv"
           elif [[ -f outputs/ffvn_daily_latest.csv ]]; then
+            export_csv="outputs/ffvn_daily_latest.csv"
+          elif [[ -f ffvn_daily_latest.csv ]]; then
+            mv ffvn_daily_latest.csv outputs/ffvn_daily_latest.csv
             export_csv="outputs/ffvn_daily_latest.csv"
           else
             echo "Fetch artifact did not contain a usable CSV or SQLite store. Run FFVN Daily Fetch (Scheduled) again after updating the workflow."
