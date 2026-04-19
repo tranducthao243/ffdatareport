@@ -104,6 +104,12 @@ python -m datasocial --build-configured-reports --load-store outputs\ffvn_master
 python -m datasocial --build-configured-reports --load-store outputs\ffvn_master.sqlite --save-report outputs\ffvn_master_reports.json --send-seatalk
 ```
 
+### 5. Build preview text cho từng group mà không gửi thật
+
+```powershell
+python -m datasocial --build-configured-reports --load-store outputs\ffvn_master.sqlite --save-report outputs\ffvn_master_reports.json --save-rendered-dir outputs\rendered_reports
+```
+
 ## GitHub Actions
 
 Workflow production vẫn giữ cấu trúc cũ:
@@ -120,6 +126,7 @@ Production model hiện tại:
   - `outputs/ffvn_master_latest.csv`
   - `outputs/ffvn_master.sqlite`
 - send workflow đọc SQLite và gửi report package theo config
+- send workflow cũng có thể chạy ở chế độ preview-only để chỉ build artifact mà không gửi SeaTalk
 
 ## Required secrets
 

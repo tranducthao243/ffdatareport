@@ -11,7 +11,7 @@ Mô hình production hiện tại là:
 1. Google Apps Script gọi workflow fetch trên GitHub.
 2. Workflow fetch lấy dữ liệu từ Social Data và lưu artifact CSV.
 3. Google Apps Script gọi workflow send trên GitHub.
-4. Workflow send đọc artifact CSV, build report và gửi SeaTalk.
+4. Workflow send đọc artifact fetch, build report từ SQLite và gửi SeaTalk.
 
 Project Apps Script đang dùng:
 
@@ -40,9 +40,10 @@ Output:
 
 Mục đích:
 
-- tải artifact CSV fetch mới nhất
-- chạy `analyze-only`
-- gửi report qua SeaTalk
+- tải artifact fetch mới nhất
+- dựng SQLite nếu cần
+- build report package theo config
+- gửi report qua SeaTalk hoặc chỉ build preview
 
 Lưu ý:
 
@@ -51,7 +52,8 @@ Lưu ý:
 
 Output:
 
-- `outputs/ffvn_daily_latest.json`
+- `outputs/ffvn_master_reports.json`
+- `outputs/rendered_reports/*.txt`
 - artifact tên `ffvn-daily-send-latest`
 
 ### `FFVN Report Control Panel`
@@ -109,6 +111,18 @@ Chạy đúng thứ tự:
 1. `FFVN Daily Fetch (Scheduled)`
 2. đợi artifact fetch xuất hiện
 3. `FFVN Daily Send (Scheduled)`
+
+### Preview report mà không gửi thật
+
+Tại `FFVN Daily Send (Scheduled)`, chọn:
+
+- `send_mode = preview`
+
+Kết quả:
+
+- workflow vẫn build đầy đủ package
+- vẫn upload JSON + preview text artifact
+- không gọi SeaTalk API
 
 ## 4. Giờ chạy thật đang nằm ở đâu
 

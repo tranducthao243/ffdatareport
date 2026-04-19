@@ -2,6 +2,15 @@ name: FFVN Daily Send (Scheduled)
 
 on:
   workflow_dispatch:
+    inputs:
+      send_mode:
+        description: "Choose whether to send to SeaTalk or only build preview artifacts"
+        required: true
+        default: send
+        type: choice
+        options:
+          - send
+          - preview
 
 permissions:
   contents: read
@@ -25,6 +34,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest
+      SEND_MODE: ${{ inputs.send_mode || 'send' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,15 +169,20 @@ jobs:
             --save-store outputs/ffvn_master.sqlite \
             --report-timezone Asia/Ho_Chi_Minh
 
-      - name: Build and send configured reports
+      - name: Build configured reports
         run: |
+          extra_args=""
+          if [[ "${SEND_MODE}" == "send" ]]; then
+            extra_args="--send-seatalk"
+          fi
+
           python -m datasocial \
             --preset ffvn_master_daily \
             --build-configured-reports \
             --load-store outputs/ffvn_master.sqlite \
             --save-report outputs/ffvn_master_reports.json \
             --save-rendered-dir outputs/rendered_reports \
-            --send-seatalk
+            ${extra_args}
 
       - name: Build job summary
         if: always()
@@ -175,6 +190,7 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           path = Path("outputs/ffvn_master_reports.json")
@@ -190,6 +206,7 @@ jobs:
               "# FFVN Daily Send",
               "",
               "- Trigger mode: `workflow_dispatch`",
+              f"- Send mode: `{os.environ.get('SEND_MODE', 'send')}`",
               f"- Generated: `{report.get('generatedAt', '-')}`",
               f"- Package count: `{report.get('packageCount', 0)}`",
               f"- Validation warnings: `{report.get('validation', {}).get('warningCount', 0)}`",
