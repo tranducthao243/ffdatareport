@@ -189,6 +189,23 @@ def slugify_filename(value: str) -> str:
     return normalized or "report"
 
 
+def parse_admin_employee_codes() -> list[str]:
+    raw_values = [
+        os.getenv("SEATALK_ADMIN_EMPLOYEE_CODES", ""),
+        os.getenv("SEATALK_ADMIN_EMPLOYEE_CODE", ""),
+    ]
+    results: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_values:
+        for token in raw.replace(";", ",").split(","):
+            value = token.strip()
+            if not value or value in seen:
+                continue
+            seen.add(value)
+            results.append(value)
+    return results
+
+
 def persist_rendered_packages(rendered_dir: Path | None, payload: dict) -> list[str]:
     if not rendered_dir:
         return []
@@ -336,6 +353,7 @@ def main() -> int:
                 send=args.send_seatalk,
                 seatalk_app_id=settings.seatalk_app_id,
                 seatalk_app_secret=settings.seatalk_app_secret,
+                seatalk_admin_employee_codes=parse_admin_employee_codes(),
             )
             if args.save_report:
                 args.save_report.parent.mkdir(parents=True, exist_ok=True)

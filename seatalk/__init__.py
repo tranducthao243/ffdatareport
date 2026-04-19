@@ -2,6 +2,7 @@ from .auth import build_seatalk_client
 from .callbacks import (
     SeatalkCallbackError,
     extract_click_value,
+    extract_message_text,
     extract_sender_employee_code,
     parse_click_payload,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "build_seatalk_client",
     "SeatalkCallbackError",
     "extract_click_value",
+    "extract_message_text",
     "extract_sender_employee_code",
     "parse_click_payload",
     "build_interactive_actions",

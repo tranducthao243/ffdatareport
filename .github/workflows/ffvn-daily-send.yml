@@ -31,6 +31,7 @@ jobs:
       SEATALK_GROUP_ID: ${{ secrets.SEATALK_GROUP_ID }}
       SEATALK_CAMPAIGN_GROUP_ID: ${{ secrets.SEATALK_CAMPAIGN_GROUP_ID }}
       SEATALK_OFFICIAL_GROUP_ID: ${{ secrets.SEATALK_OFFICIAL_GROUP_ID }}
+      SEATALK_ADMIN_EMPLOYEE_CODE: ${{ secrets.SEATALK_ADMIN_EMPLOYEE_CODE }}
       GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       ARTIFACT_NAME: ffvn-daily-fetch-latest

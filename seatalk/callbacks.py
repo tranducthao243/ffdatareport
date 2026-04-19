@@ -81,6 +81,17 @@ def extract_quoted_message_id(event: dict[str, Any]) -> str:
     )
 
 
+def extract_message_text(event: dict[str, Any]) -> str:
+    return _first_non_empty(
+        event.get("text", {}).get("plain_text"),
+        event.get("text", {}).get("content"),
+        event.get("message", {}).get("text", {}).get("plain_text"),
+        event.get("message", {}).get("text", {}).get("content"),
+        event.get("plain_text"),
+        event.get("content"),
+    )
+
+
 def build_callback_context(event: dict[str, Any]) -> dict[str, str]:
     return {
         "employee_code": extract_sender_employee_code(event),
@@ -89,6 +100,7 @@ def build_callback_context(event: dict[str, Any]) -> dict[str, str]:
         "thread_id": extract_thread_id(event),
         "quoted_message_id": extract_quoted_message_id(event),
         "click_value": extract_click_value(event),
+        "message_text": extract_message_text(event),
     }
 
 

@@ -17,6 +17,14 @@ import zipfile
 import requests
 
 from app.pipeline import build_report_package_by_code
+from app.config_loader import load_json
+from app.health import (
+    build_health_snapshot,
+    classify_private_command,
+    format_data_report,
+    format_health_report,
+    format_scope_report,
+)
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
 
@@ -78,6 +86,12 @@ def verify_signature(raw_body: bytes, signing_secret: str, received_signature: s
 def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     preset = load_preset(args.preset)
     preset_data = preset.data
+    admin_codes: list[str] = []
+    for raw in (os.getenv("SEATALK_ADMIN_EMPLOYEE_CODES", ""), os.getenv("SEATALK_ADMIN_EMPLOYEE_CODE", "")):
+        for token in raw.replace(";", ",").split(","):
+            value = token.strip()
+            if value and value not in admin_codes:
+                admin_codes.append(value)
     return {
         "db_path": args.db_path,
         "groups_config": args.groups_config,
@@ -96,6 +110,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "signing_secret": args.signing_secret,
         "seatalk_app_id": os.getenv("SEATALK_APP_ID", "").strip(),
         "seatalk_app_secret": os.getenv("SEATALK_APP_SECRET", "").strip(),
+        "admin_employee_codes": admin_codes,
     }
 
 
@@ -193,6 +208,15 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
                 if event_type == "interactive_message_click":
                     self._handle_interactive_click(event)
+                    self._write_json(HTTPStatus.OK, {"code": 0})
+                    return
+
+                if event_type in {
+                    "message_from_bot_subscriber",
+                    "message_received_from_bot_user",
+                    "message_from_user",
+                }:
+                    self._handle_private_message(event)
                     self._write_json(HTTPStatus.OK, {"code": 0})
                     return
 
@@ -302,6 +326,134 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             client.send_text(message_text)
             LOGGER.info("Seatalk callback reply sent as private message | employee_code=%s", employee_code)
+
+        def _handle_private_message(self, event: dict[str, Any]) -> None:
+            callback_context = build_callback_context(event)
+            LOGGER.info(
+                "Seatalk private message context | %s",
+                json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
+            )
+            employee_code = callback_context["employee_code"]
+            if not employee_code:
+                raise SeatalkCallbackError("Missing employee_code in private message event.")
+            admin_codes = set(runtime.get("admin_employee_codes") or [])
+            if admin_codes and employee_code not in admin_codes:
+                client = build_seatalk_client(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    employee_code=employee_code,
+                )
+                client.send_text("**Bot chi nhan lenh private tu admin da duoc cap quyen.**")
+                LOGGER.info("Rejected private command from unauthorized employee_code=%s", employee_code)
+                return
+
+            message_text = callback_context["message_text"]
+            command = classify_private_command(message_text)
+            thread_id = callback_context["thread_id"] or callback_context["message_id"]
+            private_client = build_seatalk_client(
+                app_id=runtime["seatalk_app_id"],
+                app_secret=runtime["seatalk_app_secret"],
+                employee_code=employee_code,
+                thread_id=thread_id,
+            )
+            try:
+                private_client.set_typing_status()
+                LOGGER.info(
+                    "Seatalk private typing status sent | employee_code=%s | thread_id=%s",
+                    employee_code,
+                    thread_id or "-",
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Seatalk private typing status failed | employee_code=%s | thread_id=%s",
+                    employee_code,
+                    thread_id or "-",
+                )
+
+            if command == "refresh" and runtime["sync_on_click"]:
+                sync_store_from_github_artifact(runtime)
+
+            campaigns_config = load_json(runtime["campaigns_config"])
+            reports_payload = self._build_reports_payload()
+            health_snapshot = build_health_snapshot(
+                reports_payload,
+                db_path=runtime["db_path"],
+                source_scope={
+                    "category_ids": runtime["preset_category_ids"],
+                    "platform_ids": runtime["preset_platform_ids"],
+                },
+                campaigns_config=campaigns_config,
+                now=datetime.now(),
+            )
+
+            if command == "campaign":
+                reply_text = self._build_report_text("TOPD_REPORT")
+            elif command == "official":
+                reply_text = self._build_report_text("TOPF_REPORT")
+            elif command == "data" or command == "refresh":
+                reply_text = format_data_report(health_snapshot)
+            elif command == "scope":
+                reply_text = format_scope_report(health_snapshot)
+            elif command == "health":
+                reply_text = format_health_report(health_snapshot)
+            elif command == "help":
+                reply_text = (
+                    "**Lenh bot private**\n"
+                    "*Nhap mot trong cac lenh sau de xem du lieu nhanh:*\n"
+                    "- `health`: tong quan tinh trang du lieu\n"
+                    "- `data`: kho du lieu dang dung\n"
+                    "- `scope`: source scope hien tai\n"
+                    "- `campaign`: bao cao campaign hien tai\n"
+                    "- `official`: bao cao kenh Official\n"
+                    "- `refresh`: dong bo artifact moi nhat roi tra lai thong tin du lieu\n"
+                    "- `help`: hien menu nay"
+                )
+            else:
+                reply_text = format_health_report(health_snapshot)
+
+            private_client.send_text(reply_text)
+            LOGGER.info(
+                "Seatalk private command reply sent | employee_code=%s | command=%s",
+                employee_code,
+                command,
+            )
+
+        def _build_report_text(self, report_code: str) -> str:
+            package = build_report_package_by_code(
+                runtime["db_path"],
+                report_code=report_code,
+                groups_path=runtime["groups_config"],
+                reports_path=runtime["reports_config"],
+                campaigns_path=runtime["campaigns_config"],
+                timezone_name=runtime["report_timezone"],
+                mode=runtime["report_mode"],
+                source_scope={
+                    "category_ids": runtime["preset_category_ids"],
+                    "platform_ids": runtime["preset_platform_ids"],
+                },
+                now=datetime.now(),
+            )
+            return str(package.get("renderedText") or "").strip()
+
+        def _build_reports_payload(self) -> dict[str, Any]:
+            from app.pipeline import build_configured_reports
+
+            return build_configured_reports(
+                runtime["db_path"],
+                groups_path=runtime["groups_config"],
+                reports_path=runtime["reports_config"],
+                campaigns_path=runtime["campaigns_config"],
+                timezone_name=runtime["report_timezone"],
+                mode=runtime["report_mode"],
+                source_scope={
+                    "category_ids": runtime["preset_category_ids"],
+                    "platform_ids": runtime["preset_platform_ids"],
+                },
+                send=False,
+                seatalk_app_id=runtime["seatalk_app_id"],
+                seatalk_app_secret=runtime["seatalk_app_secret"],
+                seatalk_admin_employee_codes=runtime["admin_employee_codes"],
+            )
 
         def _read_body(self) -> bytes:
             length = int(self.headers.get("Content-Length", "0") or "0")

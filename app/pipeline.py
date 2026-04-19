@@ -7,7 +7,7 @@ from typing import Any
 from datasocial.exceptions import DatasocialError
 from normalize import build_sqlite_store
 from report import build_report_packages, render_seatalk_package
-from seatalk import build_interactive_actions, send_report_packages
+from seatalk import build_interactive_actions, build_seatalk_client, send_report_packages
 
 from .config_loader import (
     format_validation_errors,
@@ -15,6 +15,7 @@ from .config_loader import (
     resolve_group_target,
     validate_reporting_config,
 )
+from .health import build_health_snapshot, format_health_alert
 
 
 def build_store_from_export(
@@ -39,6 +40,7 @@ def build_configured_reports(
     send: bool = False,
     seatalk_app_id: str = "",
     seatalk_app_secret: str = "",
+    seatalk_admin_employee_codes: list[str] | None = None,
 ) -> dict[str, Any]:
     groups_config = load_json(groups_path)
     reports_config = load_json(reports_path)
@@ -72,13 +74,66 @@ def build_configured_reports(
         package["sectionCodes"] = [section["code"] for section in package["sections"]]
         package["sectionCount"] = len(package["sections"])
 
+    health_snapshot = build_health_snapshot(
+        {
+            "packages": packages,
+            "validation": {
+                "warnings": validation["warnings"],
+            },
+        },
+        db_path=db_path,
+        source_scope=source_scope,
+        campaigns_config=campaigns_config,
+        now=now,
+    )
+
     send_results: list[dict[str, Any]] = []
     if send:
-        send_results = send_report_packages(
-            packages,
-            app_id=seatalk_app_id,
-            app_secret=seatalk_app_secret,
-        )
+        if health_snapshot["blockSend"]:
+            send_results = [
+                {
+                    "groupName": package["groupName"],
+                    "reportCode": package["reportCode"],
+                    "status": "skipped",
+                    "groupId": package["resolvedGroupId"],
+                    "reason": "data_health_blocked",
+                    "message": "Group send blocked because data health issues were detected.",
+                }
+                for package in packages
+            ]
+            admin_codes = seatalk_admin_employee_codes or []
+            for employee_code in admin_codes:
+                try:
+                    build_seatalk_client(
+                        app_id=seatalk_app_id,
+                        app_secret=seatalk_app_secret,
+                        employee_code=employee_code,
+                    ).send_text(format_health_alert(health_snapshot))
+                    send_results.append(
+                        {
+                            "groupName": "__admin__",
+                            "reportCode": "HEALTH_ALERT",
+                            "status": "sent",
+                            "employeeCode": employee_code,
+                        }
+                    )
+                except Exception as exc:
+                    send_results.append(
+                        {
+                            "groupName": "__admin__",
+                            "reportCode": "HEALTH_ALERT",
+                            "status": "failed",
+                            "employeeCode": employee_code,
+                            "reason": type(exc).__name__,
+                            "message": str(exc),
+                        }
+                    )
+        else:
+            send_results = send_report_packages(
+                packages,
+                app_id=seatalk_app_id,
+                app_secret=seatalk_app_secret,
+            )
 
     package_summaries = [
         {
@@ -106,6 +161,7 @@ def build_configured_reports(
             "warnings": validation["warnings"],
             "groupStates": validation["groupStates"],
         },
+        "dataHealth": health_snapshot,
         "summary": {
             "packagesBuilt": len(packages),
             "warnings": len(validation["warnings"]),

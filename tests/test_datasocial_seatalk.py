@@ -3,7 +3,7 @@ from unittest.mock import Mock, patch
 
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
-from seatalk.callbacks import build_callback_context, extract_click_value, parse_click_payload
+from seatalk.callbacks import build_callback_context, extract_click_value, extract_message_text, parse_click_payload
 from seatalk.callback_server import build_runtime
 from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
@@ -87,6 +87,11 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(context["message_id"], "message-1")
         self.assertEqual(context["thread_id"], "thread-1")
         self.assertEqual(context["employee_code"], "emp-1")
+
+    def test_extract_message_text_reads_private_message_plain_text(self):
+        event = {"message": {"text": {"plain_text": "health"}}}
+
+        self.assertEqual(extract_message_text(event), "health")
 
     def test_callback_server_build_runtime_reads_preset_data(self):
         class Args:
