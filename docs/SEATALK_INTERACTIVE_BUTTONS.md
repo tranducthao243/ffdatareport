@@ -1,45 +1,39 @@
 # Seatalk Interactive Buttons
 
-Phần này là groundwork cho interactive bot, chưa phải callback runtime hoàn chỉnh.
+`SO1` hien tai duoc gui bang mot `interactive_message` duy nhat:
 
-## Hiện đã có trong repo
+- `title` = tieu de report tong
+- `description` = noi dung report
+- `button_group` = `Data Campaign`, `Official Channel`
 
-- `SO1` package sẽ sinh ra `interactiveActions` trong JSON output
-- mỗi action có:
-  - `label`
-  - `actionType`
-  - `targetReportCode`
-  - `callbackPayload`
-- preview artifact `.txt` sẽ ghi kèm các action này để operator kiểm tra
+Nhu vay nut se nam cung message bao cao, thay vi mot follow-up card tach rieng.
 
-Hiện tại action mặc định của `SO1`:
+## Callback runtime
 
-- `Data Campaign` -> `TOPD_REPORT`
-- `Official Channel` -> `TOPF_REPORT`
+Repo hien tai da co callback runtime toi gian:
 
-## Chưa làm ở bước này
+```powershell
+python -m seatalk.callback_server --db-path outputs\ffvn_master.sqlite --preset ffvn_master_daily
+```
 
-- chưa gửi button thật lên SeaTalk
-- chưa có callback endpoint public
-- chưa verify signature callback từ SeaTalk
-- chưa có logic reply khi user bấm button
+Runtime nay:
 
-## Callback runtime cần có ở bước sau
+1. nhan callback `interactive_message_click`
+2. doc `callbackPayload`
+3. xac dinh `target_report_code`
+4. build lai `TOPD_REPORT` hoac `TOPF_REPORT` tu SQLite + config hien tai
+5. gui private message tra ve cho nguoi bam
 
-SeaTalk interactive flow cần một server/webhook luôn online:
+## Cac bien moi truong quan trong
 
-1. SeaTalk gửi event về callback endpoint
-2. server verify signature
-3. parse `interactive_message_click`
-4. đọc `callbackPayload`
-5. build report mục tiêu (`TOPD_REPORT` hoặc `TOPF_REPORT`)
-6. gửi tin nhắn follow-up qua SeaTalk API
+- `SEATALK_APP_ID`
+- `SEATALK_APP_SECRET`
+- `SEATALK_SIGNING_SECRET` (optional)
+- `SEATALK_VERIFY_SIGNATURE=true|false`
+- `DATAMASTER_STORE_PATH` (optional, mac dinh `outputs/ffvn_master.sqlite`)
+- `DATASOCIAL_CALLBACK_PRESET` (optional, mac dinh `ffvn_master_daily`)
 
-## Gợi ý runtime phù hợp
+## Luu y
 
-- Apps Script webhook
-- Cloud Run
-- Render / Railway
-- VPS nhỏ
-
-GitHub Actions không phù hợp để làm callback runtime vì không có endpoint sống liên tục.
+- GitHub Actions khong the tu dung lam callback runtime vi khong co HTTP endpoint song lien tuc.
+- De nut bam hoat dong that, callback URL cua Seatalk phai tro vao mot process dang chay `seatalk.callback_server` hoac mot runtime tuong duong.

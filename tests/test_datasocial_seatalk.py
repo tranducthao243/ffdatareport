@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from datasocial.formatter import render_seatalk_report
-from seatalk.payloads import build_interactive_payload
+from seatalk.callbacks import extract_click_value, parse_click_payload
+from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
 
 
@@ -42,8 +43,35 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(len(elements[2]["button_group"]), 2)
         self.assertEqual(elements[2]["button_group"][0]["button_type"], "callback")
 
+    def test_build_report_interactive_payload_embeds_rendered_text(self):
+        payload = build_report_interactive_payload(
+            {
+                "title": "Bao cao tong hop",
+                "reportCode": "SO1",
+                "renderedText": "Bao cao tong hop\nDong 1\nDong 2",
+                "interactiveActions": [
+                    {"label": "Data Campaign", "callbackPayload": '{"action":"campaign"}'},
+                ],
+            }
+        )
+
+        elements = payload["interactive_message"]["elements"]
+        self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
+        self.assertEqual(elements[1]["description"]["text"], "Dong 1\nDong 2")
+
+    def test_parse_click_payload_decodes_json_value(self):
+        payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
+
+        self.assertEqual(payload["action"], "open_report")
+        self.assertEqual(payload["target_report_code"], "TOPD_REPORT")
+
+    def test_extract_click_value_reads_nested_action_value(self):
+        event = {"action": {"value": '{"action":"open_report"}'}}
+
+        self.assertEqual(extract_click_value(event), '{"action":"open_report"}')
+
     @patch("seatalk.sender.build_seatalk_client")
-    def test_send_report_packages_sends_interactive_follow_up_when_actions_exist(self, mock_build_client):
+    def test_send_report_packages_sends_single_interactive_message_when_actions_exist(self, mock_build_client):
         client = Mock()
         mock_build_client.return_value = client
         packages = [
@@ -51,7 +79,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
                 "groupName": "main",
                 "reportCode": "SO1",
                 "resolvedGroupId": "group-1",
-                "renderedText": "hello",
+                "renderedText": "Bao cao\nhello",
                 "title": "Bao cao",
                 "interactiveActions": [
                     {"label": "Data Campaign", "callbackPayload": '{"action":"campaign"}'},
@@ -61,7 +89,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         result = send_report_packages(packages, app_id="id", app_secret="secret")
 
-        client.send_text.assert_called_once()
+        client.send_text.assert_not_called()
         client.send_interactive.assert_called_once()
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")

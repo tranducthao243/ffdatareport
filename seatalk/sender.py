@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .auth import build_seatalk_client
-from .payloads import build_interactive_payload, build_text_payload
+from .payloads import build_report_interactive_payload, build_text_payload
 
 
 def send_report_packages(
@@ -27,19 +27,14 @@ def send_report_packages(
             continue
         try:
             client = build_seatalk_client(app_id=app_id, app_secret=app_secret, group_id=group_id)
-            client.send_text(build_text_payload(package["renderedText"]))
             interactive_status = "not_applicable"
             interactive_actions = package.get("interactiveActions") or []
             if interactive_actions:
-                interactive_payload = build_interactive_payload(
-                    title=str(package.get("title") or package.get("reportCode") or "Report"),
-                    description="Chọn dữ liệu muốn xem thêm.",
-                    actions=interactive_actions,
-                )
                 try:
-                    client.send_interactive(interactive_payload)
+                    client.send_interactive(build_report_interactive_payload(package))
                     interactive_status = "sent"
                 except Exception as exc:
+                    client.send_text(build_text_payload(package["renderedText"]))
                     interactive_status = "failed"
                     results.append(
                         {
@@ -51,6 +46,8 @@ def send_report_packages(
                             "message": str(exc),
                         }
                     )
+            else:
+                client.send_text(build_text_payload(package["renderedText"]))
             results.append(
                 {
                     "groupName": package["groupName"],

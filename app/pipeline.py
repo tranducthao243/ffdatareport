@@ -117,3 +117,64 @@ def build_configured_reports(
         "packages": packages,
         "sendResults": send_results,
     }
+
+
+def build_report_package_by_code(
+    db_path: Path,
+    *,
+    report_code: str,
+    groups_path: Path,
+    reports_path: Path,
+    campaigns_path: Path,
+    timezone_name: str,
+    mode: str,
+    source_scope: dict[str, list[int]] | None = None,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    groups_config = load_json(groups_path)
+    reports_config = load_json(reports_path)
+    campaigns_config = load_json(campaigns_path)
+    validation = validate_reporting_config(
+        groups_config,
+        reports_config,
+        campaigns_config,
+        source_scope=source_scope,
+    )
+    if validation["errors"]:
+        raise DatasocialError(format_validation_errors(validation))
+
+    invalid_group_names = set(validation["invalidGroupNames"])
+    blocked_group_names = set(validation["blockedGroupNames"])
+    selected_group = None
+    for group in groups_config.get("groups", []):
+        if not group.get("enabled", True):
+            continue
+        if group["name"] in invalid_group_names or group["name"] in blocked_group_names:
+            continue
+        if str(group.get("report_code") or "").strip() == report_code:
+            selected_group = group
+            break
+    if selected_group is None:
+        raise DatasocialError(f"No enabled group is configured for report_code '{report_code}'.")
+
+    packages = build_report_packages(
+        db_path,
+        groups_config={"groups": [selected_group]},
+        reports_config=reports_config,
+        campaigns_config=campaigns_config,
+        invalid_group_names=set(),
+        blocked_group_names=set(),
+        mode=mode,
+        timezone_name=timezone_name,
+        now=now,
+    )
+    if not packages:
+        raise DatasocialError(f"Unable to build package for report_code '{report_code}'.")
+
+    package = packages[0]
+    package["resolvedGroupId"] = resolve_group_target(selected_group)
+    package["interactiveActions"] = build_interactive_actions(package)
+    package["renderedText"] = render_seatalk_package(package)
+    package["sectionCodes"] = [section["code"] for section in package["sections"]]
+    package["sectionCount"] = len(package["sections"])
+    return package

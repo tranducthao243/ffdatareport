@@ -110,6 +110,19 @@ python -m datasocial --build-configured-reports --load-store outputs\ffvn_master
 python -m datasocial --build-configured-reports --load-store outputs\ffvn_master.sqlite --save-report outputs\ffvn_master_reports.json --save-rendered-dir outputs\rendered_reports
 ```
 
+### 6. Chay callback server cho Seatalk interactive buttons
+
+```powershell
+python -m seatalk.callback_server --db-path outputs\ffvn_master.sqlite --preset ffvn_master_daily --report-timezone Asia/Ho_Chi_Minh
+```
+
+Callback server nay se:
+
+- nhan `interactive_message_click`
+- decode `callbackPayload`
+- build lai `TOPD_REPORT` hoac `TOPF_REPORT` tu SQLite hien tai
+- gui private follow-up message cho nguoi bam nut
+
 ## GitHub Actions
 
 Workflow production vẫn giữ cấu trúc cũ:
