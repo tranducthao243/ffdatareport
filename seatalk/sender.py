@@ -27,6 +27,7 @@ def send_report_packages(
             continue
         try:
             client = build_seatalk_client(app_id=app_id, app_secret=app_secret, group_id=group_id)
+            client.send_text(build_text_payload(package["renderedText"]))
             interactive_status = "not_applicable"
             interactive_actions = package.get("interactiveActions") or []
             if interactive_actions:
@@ -34,7 +35,6 @@ def send_report_packages(
                     client.send_interactive(build_report_interactive_payload(package))
                     interactive_status = "sent"
                 except Exception as exc:
-                    client.send_text(build_text_payload(package["renderedText"]))
                     interactive_status = "failed"
                     results.append(
                         {
@@ -46,8 +46,6 @@ def send_report_packages(
                             "message": str(exc),
                         }
                     )
-            else:
-                client.send_text(build_text_payload(package["renderedText"]))
             results.append(
                 {
                     "groupName": package["groupName"],

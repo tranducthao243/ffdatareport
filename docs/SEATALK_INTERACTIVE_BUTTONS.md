@@ -1,16 +1,16 @@
 # Seatalk Interactive Buttons
 
-`SO1` hien tai duoc gui bang mot `interactive_message` duy nhat:
+`SO1` hien tai duoc gui theo cach on dinh hon voi Seatalk:
 
-- `title` = tieu de report tong
-- `description` = noi dung report
+- bao cao tong = text message nhu cu
+- card nut = mot `interactive_message` ngan ngay sau do
 - `button_group` = `Data Campaign`, `Official Channel`
 
-Nhu vay nut se nam cung message bao cao, thay vi mot follow-up card tach rieng.
+Day la cach thuc te hon vi card ngan de duoc Seatalk chap nhan on dinh.
 
 ## Callback runtime
 
-Repo hien tai da co callback runtime toi gian:
+Repo hien tai da co callback runtime toi gian, va co the deploy len Railway:
 
 ```powershell
 python -m seatalk.callback_server --db-path outputs\ffvn_master.sqlite --preset ffvn_master_daily
@@ -21,8 +21,9 @@ Runtime nay:
 1. nhan callback `interactive_message_click`
 2. doc `callbackPayload`
 3. xac dinh `target_report_code`
-4. build lai `TOPD_REPORT` hoac `TOPF_REPORT` tu SQLite + config hien tai
-5. gui private message tra ve cho nguoi bam
+4. neu can, tu dong dong bo `ffvn_master.sqlite` moi nhat tu GitHub artifact
+5. build lai `TOPD_REPORT` hoac `TOPF_REPORT` tu SQLite + config hien tai
+6. gui private message tra ve cho nguoi bam
 
 ## Cac bien moi truong quan trong
 
@@ -32,8 +33,13 @@ Runtime nay:
 - `SEATALK_VERIFY_SIGNATURE=true|false`
 - `DATAMASTER_STORE_PATH` (optional, mac dinh `outputs/ffvn_master.sqlite`)
 - `DATASOCIAL_CALLBACK_PRESET` (optional, mac dinh `ffvn_master_daily`)
+- `GITHUB_TOKEN`
+- `GITHUB_REPOSITORY`
+- `DATAMASTER_ARTIFACT_NAME`
+- `DATAMASTER_SYNC_ON_START=true|false`
+- `DATAMASTER_SYNC_ON_CLICK=true|false`
 
 ## Luu y
 
 - GitHub Actions khong the tu dung lam callback runtime vi khong co HTTP endpoint song lien tuc.
-- De nut bam hoat dong that, callback URL cua Seatalk phai tro vao mot process dang chay `seatalk.callback_server` hoac mot runtime tuong duong.
+- De nut bam hoat dong that, callback URL cua Seatalk phai tro vao service public tren Railway tai duong dan `/callback`.

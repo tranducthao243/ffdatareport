@@ -46,15 +46,9 @@ def build_interactive_payload(
 
 
 def build_report_interactive_payload(package: dict) -> dict:
-    rendered_text = str(package.get("renderedText") or "").strip()
     title = str(package.get("title") or package.get("reportCode") or "Report").strip()
-    description = rendered_text
-    if description.startswith(title):
-        description = description[len(title):].lstrip("\n").strip()
-    if not description:
-        description = rendered_text or "Khong co du lieu."
     return build_interactive_payload(
         title=title,
-        description=description,
+        description="Chon du lieu muon xem them.",
         actions=list(package.get("interactiveActions") or []),
     )

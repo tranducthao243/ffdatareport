@@ -57,7 +57,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         elements = payload["interactive_message"]["elements"]
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
-        self.assertEqual(elements[1]["description"]["text"], "Dong 1\nDong 2")
+        self.assertEqual(elements[1]["description"]["text"], "Chon du lieu muon xem them.")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
@@ -71,7 +71,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(extract_click_value(event), '{"action":"open_report"}')
 
     @patch("seatalk.sender.build_seatalk_client")
-    def test_send_report_packages_sends_single_interactive_message_when_actions_exist(self, mock_build_client):
+    def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):
         client = Mock()
         mock_build_client.return_value = client
         packages = [
@@ -89,7 +89,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         result = send_report_packages(packages, app_id="id", app_secret="secret")
 
-        client.send_text.assert_not_called()
+        client.send_text.assert_called_once()
         client.send_interactive.assert_called_once()
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")

@@ -6,11 +6,15 @@ import hmac
 import json
 import logging
 import os
+import tempfile
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+import zipfile
+
+import requests
 
 from app.pipeline import build_report_package_by_code
 from datasocial.exceptions import DatasocialError
@@ -46,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--preset", default=os.getenv("DATASOCIAL_CALLBACK_PRESET", "ffvn_master_daily"))
     parser.add_argument("--report-mode", default=os.getenv("DATAMASTER_REPORT_MODE", "today_so_far"))
     parser.add_argument("--report-timezone", default=os.getenv("DATAMASTER_REPORT_TIMEZONE", "Asia/Ho_Chi_Minh"))
+    parser.add_argument("--repo", default=os.getenv("GITHUB_REPOSITORY", "tranducthao243/ffdatareport"))
+    parser.add_argument("--artifact-name", default=os.getenv("DATAMASTER_ARTIFACT_NAME", "ffvn-daily-fetch-latest"))
+    parser.add_argument("--artifact-token", default=os.getenv("GITHUB_TOKEN", "").strip())
+    parser.add_argument("--sync-on-start", action="store_true", default=_env_flag("DATAMASTER_SYNC_ON_START"))
+    parser.add_argument("--sync-on-click", action="store_true", default=_env_flag("DATAMASTER_SYNC_ON_CLICK"))
     parser.add_argument("--verify-signature", action="store_true", default=_env_flag("SEATALK_VERIFY_SIGNATURE"))
     parser.add_argument("--signing-secret", default=os.getenv("SEATALK_SIGNING_SECRET", ""))
     parser.add_argument("--debug", action="store_true")
@@ -77,11 +86,76 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "preset_platform_ids": list(preset.get("platform_ids") or []),
         "report_mode": args.report_mode,
         "report_timezone": args.report_timezone,
+        "repo": args.repo,
+        "artifact_name": args.artifact_name,
+        "artifact_token": args.artifact_token,
+        "sync_on_start": bool(args.sync_on_start),
+        "sync_on_click": bool(args.sync_on_click),
         "verify_signature": bool(args.verify_signature),
         "signing_secret": args.signing_secret,
         "seatalk_app_id": os.getenv("SEATALK_APP_ID", "").strip(),
         "seatalk_app_secret": os.getenv("SEATALK_APP_SECRET", "").strip(),
     }
+
+
+def sync_store_from_github_artifact(runtime: dict[str, Any]) -> bool:
+    token = str(runtime.get("artifact_token") or "").strip()
+    repo = str(runtime.get("repo") or "").strip()
+    artifact_name = str(runtime.get("artifact_name") or "").strip()
+    db_path = Path(runtime["db_path"])
+    if not token or not repo or not artifact_name:
+        return False
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    response = requests.get(
+        f"https://api.github.com/repos/{repo}/actions/artifacts",
+        params={"per_page": 100},
+        headers=headers,
+        timeout=30,
+    )
+    response.raise_for_status()
+    artifacts = response.json().get("artifacts", [])
+    candidates = [
+        item
+        for item in artifacts
+        if item.get("name") == artifact_name and not item.get("expired")
+    ]
+    if not candidates:
+        raise DatasocialError(f"No usable artifact named '{artifact_name}' found in repository '{repo}'.")
+    candidates.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    artifact_id = candidates[0]["id"]
+
+    download = requests.get(
+        f"https://api.github.com/repos/{repo}/actions/artifacts/{artifact_id}/zip",
+        headers=headers,
+        timeout=120,
+    )
+    download.raise_for_status()
+
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory() as temp_dir:
+        zip_path = Path(temp_dir) / "artifact.zip"
+        zip_path.write_bytes(download.content)
+        with zipfile.ZipFile(zip_path, "r") as archive:
+            members = archive.namelist()
+            sqlite_member = next(
+                (
+                    name
+                    for name in members
+                    if name.endswith("ffvn_master.sqlite")
+                ),
+                "",
+            )
+            if not sqlite_member:
+                raise DatasocialError("Fetch artifact does not contain ffvn_master.sqlite.")
+            extracted = archive.extract(sqlite_member, temp_dir)
+            Path(extracted).replace(db_path)
+    LOGGER.info("Synced SQLite store from GitHub artifact %s into %s", artifact_id, db_path)
+    return True
 
 
 def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
@@ -140,6 +214,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             target_report_code = str(click_payload.get("target_report_code") or "").strip()
             if not target_report_code:
                 raise SeatalkCallbackError("Missing target_report_code in callback payload.")
+            if runtime["sync_on_click"]:
+                sync_store_from_github_artifact(runtime)
 
             package = build_report_package_by_code(
                 runtime["db_path"],
@@ -187,6 +263,8 @@ def run_server(args: argparse.Namespace) -> None:
     runtime = build_runtime(args)
     if not runtime["seatalk_app_id"] or not runtime["seatalk_app_secret"]:
         raise DatasocialError("SEATALK_APP_ID and SEATALK_APP_SECRET are required for callback replies.")
+    if runtime["sync_on_start"]:
+        sync_store_from_github_artifact(runtime)
     handler = make_handler(runtime)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         LOGGER.info("Seatalk callback server listening on http://%s:%s", args.host, args.port)

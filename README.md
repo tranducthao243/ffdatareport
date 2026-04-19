@@ -123,6 +123,28 @@ Callback server nay se:
 - build lai `TOPD_REPORT` hoac `TOPF_REPORT` tu SQLite hien tai
 - gui private follow-up message cho nguoi bam nut
 
+### 7. Deploy callback server len Railway
+
+Repo da co san:
+
+- [Procfile](C:/Users/admin/OneDrive/Documents/New%20project/datatool/Procfile)
+- [railway.json](C:/Users/admin/OneDrive/Documents/New%20project/datatool/railway.json)
+
+Env vars toi thieu tren Railway:
+
+- `SEATALK_APP_ID`
+- `SEATALK_APP_SECRET`
+- `GITHUB_TOKEN`
+- `GITHUB_REPOSITORY=tranducthao243/ffdatareport`
+- `DATAMASTER_ARTIFACT_NAME=ffvn-daily-fetch-latest`
+- `DATAMASTER_SYNC_ON_START=true`
+- `DATAMASTER_SYNC_ON_CLICK=true`
+
+Neu SeaTalk callback can verify signature:
+
+- `SEATALK_SIGNING_SECRET`
+- `SEATALK_VERIFY_SIGNATURE=true`
+
 ## GitHub Actions
 
 Workflow production vẫn giữ cấu trúc cũ:
