@@ -207,6 +207,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             employee_code = extract_sender_employee_code(event)
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in callback event.")
+            if not runtime["seatalk_app_id"] or not runtime["seatalk_app_secret"]:
+                raise SeatalkCallbackError(
+                    "SEATALK_APP_ID and SEATALK_APP_SECRET are required before callback replies can be sent."
+                )
             raw_value = extract_click_value(event)
             click_payload = parse_click_payload(raw_value)
             action = str(click_payload.get("action") or "").strip()
@@ -263,7 +267,10 @@ def run_server(args: argparse.Namespace) -> None:
     configure_logging(args.debug)
     runtime = build_runtime(args)
     if not runtime["seatalk_app_id"] or not runtime["seatalk_app_secret"]:
-        raise DatasocialError("SEATALK_APP_ID and SEATALK_APP_SECRET are required for callback replies.")
+        LOGGER.warning(
+            "SEATALK_APP_ID and/or SEATALK_APP_SECRET are not configured. "
+            "Server will start, but callback replies will fail until these vars are set."
+        )
     if runtime["sync_on_start"]:
         sync_store_from_github_artifact(runtime)
     handler = make_handler(runtime)
