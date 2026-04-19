@@ -228,6 +228,29 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             target_report_code = str(click_payload.get("target_report_code") or "").strip()
             if not target_report_code:
                 raise SeatalkCallbackError("Missing target_report_code in callback payload.")
+            try:
+                typing_client = build_seatalk_client(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    group_id=group_id,
+                    employee_code="" if group_id else employee_code,
+                    thread_id=thread_id,
+                    quoted_message_id=quoted_message_id,
+                )
+                typing_client.set_typing_status()
+                LOGGER.info(
+                    "Seatalk typing status sent | group_id=%s | employee_code=%s | thread_id=%s",
+                    group_id or "-",
+                    employee_code or "-",
+                    thread_id or "-",
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Seatalk typing status failed | group_id=%s | employee_code=%s | thread_id=%s",
+                    group_id or "-",
+                    employee_code or "-",
+                    thread_id or "-",
+                )
             if runtime["sync_on_click"]:
                 sync_store_from_github_artifact(runtime)
 

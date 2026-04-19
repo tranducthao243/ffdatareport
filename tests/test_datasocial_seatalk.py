@@ -133,6 +133,50 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
         self.assertEqual(kwargs["json"]["quoted_message_id"], "message-1")
 
+    def test_group_typing_includes_thread_id_when_present(self):
+        client = SeaTalkClient(
+            SeaTalkSettings(
+                app_id="app",
+                app_secret="secret",
+                group_id="group-1",
+                thread_id="thread-1",
+            )
+        )
+        client.token = "token"
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {"code": 0}
+        client.session.post = Mock(return_value=response)
+
+        client.set_typing_status()
+
+        args, kwargs = client.session.post.call_args
+        self.assertTrue(args[0].endswith("/messaging/v2/group_chat_typing"))
+        self.assertEqual(kwargs["json"]["group_id"], "group-1")
+        self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
+
+    def test_private_typing_includes_employee_code(self):
+        client = SeaTalkClient(
+            SeaTalkSettings(
+                app_id="app",
+                app_secret="secret",
+                employee_code="e_123",
+                thread_id="message-1",
+            )
+        )
+        client.token = "token"
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {"code": 0}
+        client.session.post = Mock(return_value=response)
+
+        client.set_typing_status()
+
+        args, kwargs = client.session.post.call_args
+        self.assertTrue(args[0].endswith("/messaging/v2/single_chat_typing"))
+        self.assertEqual(kwargs["json"]["employee_code"], "e_123")
+        self.assertEqual(kwargs["json"]["thread_id"], "message-1")
+
     @patch("seatalk.sender.build_seatalk_client")
     def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):
         client = Mock()

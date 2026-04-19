@@ -67,6 +67,36 @@ class SeaTalkClient:
     def send_interactive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.send_message(payload)
 
+    def set_typing_status(self) -> dict[str, Any]:
+        token = self.token or self.get_app_access_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+
+        if self.settings.group_id:
+            payload: dict[str, Any] = {"group_id": self.settings.group_id}
+            if self.settings.thread_id:
+                payload["thread_id"] = self.settings.thread_id
+            url = f"{SEATALK_OPENAPI_BASE}/messaging/v2/group_chat_typing"
+        elif self.settings.employee_code:
+            payload = {"employee_code": self.settings.employee_code}
+            if self.settings.thread_id:
+                payload["thread_id"] = self.settings.thread_id
+            url = f"{SEATALK_OPENAPI_BASE}/messaging/v2/single_chat_typing"
+        else:
+            raise SeaTalkError("SeaTalk target missing. Set group_id or employee_code.")
+
+        response = self.session.post(url, headers=headers, json=payload, timeout=30)
+        if not response.ok:
+            raise SeaTalkError(
+                f"SeaTalk typing failed with HTTP {response.status_code}: {response.text[:500]}"
+            )
+        data = response.json()
+        if data.get("code") not in (0, "0", None):
+            raise SeaTalkError(f"SeaTalk typing returned non-zero code: {data}")
+        return data
+
     def send_message(self, message: dict[str, Any]) -> dict[str, Any]:
         token = self.token or self.get_app_access_token()
         headers = {
