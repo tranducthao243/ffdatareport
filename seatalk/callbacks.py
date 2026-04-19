@@ -29,6 +29,25 @@ def extract_sender_employee_code(event: dict[str, Any]) -> str:
     )
 
 
+def extract_sender_email(event: dict[str, Any]) -> str:
+    return _first_non_empty(
+        event.get("email"),
+        event.get("sender", {}).get("email"),
+        event.get("operator", {}).get("email"),
+        event.get("employee", {}).get("email"),
+    )
+
+
+def extract_sender_seatalk_id(event: dict[str, Any]) -> str:
+    return _first_non_empty(
+        event.get("seatalk_id"),
+        event.get("sender", {}).get("seatalk_id"),
+        event.get("sender", {}).get("id"),
+        event.get("operator", {}).get("seatalk_id"),
+        event.get("employee", {}).get("seatalk_id"),
+    )
+
+
 def extract_click_value(event: dict[str, Any]) -> str:
     return _first_non_empty(
         event.get("value")
@@ -95,6 +114,8 @@ def extract_message_text(event: dict[str, Any]) -> str:
 def build_callback_context(event: dict[str, Any]) -> dict[str, str]:
     return {
         "employee_code": extract_sender_employee_code(event),
+        "email": extract_sender_email(event),
+        "seatalk_id": extract_sender_seatalk_id(event),
         "group_id": extract_group_id(event),
         "message_id": extract_message_id(event),
         "thread_id": extract_thread_id(event),

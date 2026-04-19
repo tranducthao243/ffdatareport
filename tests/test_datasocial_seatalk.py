@@ -78,6 +78,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             "message_id": "message-1",
             "thread_id": "thread-1",
             "employee_code": "emp-1",
+            "email": "tester@example.com",
+            "seatalk_id": "seatalk-1",
             "button": {"value": '{"action":"open_report"}'},
         }
 
@@ -87,6 +89,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(context["message_id"], "message-1")
         self.assertEqual(context["thread_id"], "thread-1")
         self.assertEqual(context["employee_code"], "emp-1")
+        self.assertEqual(context["email"], "tester@example.com")
+        self.assertEqual(context["seatalk_id"], "seatalk-1")
 
     def test_extract_message_text_reads_private_message_plain_text(self):
         event = {"message": {"text": {"plain_text": "health"}}}
@@ -110,10 +114,22 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             verify_signature = False
             signing_secret = ""
 
-        runtime = build_runtime(Args())
+        with patch.dict(
+            "os.environ",
+            {
+                "SEATALK_ADMIN_EMPLOYEE_CODES": "e_1,e_2",
+                "SEATALK_ADMIN_EMAILS": "a@example.com,b@example.com",
+                "SEATALK_ADMIN_SEATALK_IDS": "1001,1002",
+            },
+            clear=False,
+        ):
+            runtime = build_runtime(Args())
 
         self.assertIn(13, runtime["preset_category_ids"])
         self.assertIn(1, runtime["preset_platform_ids"])
+        self.assertEqual(runtime["admin_employee_codes"], ["e_1", "e_2"])
+        self.assertEqual(runtime["admin_emails"], ["a@example.com", "b@example.com"])
+        self.assertEqual(runtime["admin_seatalk_ids"], ["1001", "1002"])
 
     def test_group_send_includes_thread_fields_when_present(self):
         client = SeaTalkClient(

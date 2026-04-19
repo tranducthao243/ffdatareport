@@ -93,6 +93,18 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
             value = token.strip()
             if value and value not in admin_codes:
                 admin_codes.append(value)
+    admin_emails: list[str] = []
+    for raw in (os.getenv("SEATALK_ADMIN_EMAILS", ""), os.getenv("SEATALK_ADMIN_EMAIL", "")):
+        for token in raw.replace(";", ",").split(","):
+            value = token.strip().lower()
+            if value and value not in admin_emails:
+                admin_emails.append(value)
+    admin_seatalk_ids: list[str] = []
+    for raw in (os.getenv("SEATALK_ADMIN_SEATALK_IDS", ""), os.getenv("SEATALK_ADMIN_SEATALK_ID", "")):
+        for token in raw.replace(";", ",").split(","):
+            value = token.strip()
+            if value and value not in admin_seatalk_ids:
+                admin_seatalk_ids.append(value)
     return {
         "db_path": args.db_path,
         "groups_config": args.groups_config,
@@ -112,6 +124,8 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "seatalk_app_id": os.getenv("SEATALK_APP_ID", "").strip(),
         "seatalk_app_secret": os.getenv("SEATALK_APP_SECRET", "").strip(),
         "admin_employee_codes": admin_codes,
+        "admin_emails": admin_emails,
+        "admin_seatalk_ids": admin_seatalk_ids,
     }
 
 
@@ -335,17 +349,38 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
             )
             employee_code = callback_context["employee_code"]
+            email = callback_context["email"].lower()
+            seatalk_id = callback_context["seatalk_id"]
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in private message event.")
             admin_codes = set(runtime.get("admin_employee_codes") or [])
-            if admin_codes and employee_code not in admin_codes:
+            admin_emails = set(runtime.get("admin_emails") or [])
+            admin_seatalk_ids = set(runtime.get("admin_seatalk_ids") or [])
+            allowlist_enabled = bool(admin_codes or admin_emails or admin_seatalk_ids)
+            is_authorized = (
+                employee_code in admin_codes
+                or (email and email in admin_emails)
+                or (seatalk_id and seatalk_id in admin_seatalk_ids)
+            )
+            if allowlist_enabled and not is_authorized:
                 client = build_seatalk_client(
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
                     employee_code=employee_code,
                 )
-                client.send_text("**Bot chi nhan lenh private tu admin da duoc cap quyen.**")
-                LOGGER.info("Rejected private command from unauthorized employee_code=%s", employee_code)
+                client.send_text(
+                    "**Bot chi nhan lenh private tu admin da duoc cap quyen.**\n"
+                    "*Ban co the them mot trong cac dinh danh sau vao Railway:*\n"
+                    f"- employee_code: `{employee_code or '-'}`\n"
+                    f"- email: `{email or '-'}`\n"
+                    f"- seatalk_id: `{seatalk_id or '-'}`"
+                )
+                LOGGER.info(
+                    "Rejected private command from unauthorized sender | employee_code=%s | email=%s | seatalk_id=%s",
+                    employee_code,
+                    email or "-",
+                    seatalk_id or "-",
+                )
                 return
 
             message_text = callback_context["message_text"]
@@ -410,7 +445,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `help`: hien menu nay\n"
                     "\n"
                     "*Ban cung co the hoi truc tiep du lieu, vi du:*\n"
-                    "- `Jeeker da dang bao nhieu clip trong thang nay`\n"
+                    "- `Jeeker thang nay da dang bao nhieu clip`\n"
+                    "- `Jeeker thang nay tong view bao nhieu`\n"
+                    "- `Top clip cua Jeeker trong thang nay`\n"
+                    "- `So sanh Jeeker va Bac Gau trong thang nay`\n"
                     "- `Bac Gau thang nay co bao nhieu clip trieu view`"
                 )
             else:
