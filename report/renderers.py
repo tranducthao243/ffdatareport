@@ -27,6 +27,19 @@ def render_seatalk_package(package: dict[str, Any]) -> str:
     return "\n".join(line for line in lines if line is not None).strip()
 
 
+def render_callback_summary(package: dict[str, Any]) -> str:
+    sections = package.get("sections", [])
+    if not sections:
+        return "Chua co du lieu de hien thi."
+    section = sections[0]
+    code = str(section.get("code") or "").strip()
+    if code == "TOPD":
+        return render_topd_summary(section)
+    if code == "TOPF":
+        return render_topf_summary(section)
+    return str(package.get("renderedText") or "").strip()
+
+
 def render_top_by_platform(title: str, section: dict[str, Any]) -> list[str]:
     lines = [
         title,
@@ -85,6 +98,26 @@ def render_topd(section: dict[str, Any]) -> list[str]:
     return lines
 
 
+def render_topd_summary(section: dict[str, Any]) -> str:
+    campaigns = section.get("campaigns", [])
+    if not campaigns:
+        return "Chua co campaign nao duoc gan cho nhom nay."
+    campaign = campaigns[0]
+    lines = [
+        f"#{campaign['campaignName']}",
+        f"Khung theo doi: {campaign['startDate']} -> {campaign['endDate']}",
+        f"Tong view: {compact_number(campaign['totalViews'])} | Tong clip: {campaign['totalClips']}",
+        f"Tien do KPI: {campaign['kpiPercent']}% / {compact_number(campaign['kpiTarget'])}",
+        f"So ngay con lai: {campaign['daysLeft']}",
+        "Top video TikTok gan day:",
+    ]
+    for index, item in enumerate(campaign.get("topRecentTikTok", [])[:3], start=1):
+        lines.append(f"{index}. {item['channelName']} | {compact_number(item['view'])} view")
+    if len(lines) == 6:
+        lines.append("- Chua co du lieu.")
+    return "\n".join(lines)
+
+
 def render_topf(section: dict[str, Any]) -> list[str]:
     lines = [
         "Diem nhanh kenh Official",
@@ -97,6 +130,24 @@ def render_topf(section: dict[str, Any]) -> list[str]:
             f"- {platform.title()}: {compact_number(totals['totalViews'])} view | {totals['totalClips']} clip"
         )
     return lines
+
+
+def render_topf_summary(section: dict[str, Any]) -> str:
+    lines = [
+        f"Top view 3 ngay: {section['topWindow']['from']} -> {section['topWindow']['to']}",
+    ]
+    top_videos = section.get("topVideos", [])
+    if top_videos:
+        for index, item in enumerate(top_videos[:3], start=1):
+            lines.append(f"{index}. {item['channelName']} | {compact_number(item['view'])} view")
+    else:
+        lines.append("- Chua co du lieu top video.")
+    lines.append(
+        f"Tong hop 7 ngay: {section['summaryWindow']['from']} -> {section['summaryWindow']['to']}"
+    )
+    for platform, totals in section.get("platformTotals", {}).items():
+        lines.append(f"- {platform.title()}: {compact_number(totals['totalViews'])} view | {totals['totalClips']} clip")
+    return "\n".join(lines)
 
 
 def render_ranked_posts(items: list[dict[str, Any]]) -> list[str]:

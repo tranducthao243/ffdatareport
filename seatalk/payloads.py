@@ -21,26 +21,31 @@ def build_interactive_payload(
             }
         )
 
+    elements = [
+        {
+            "element_type": "title",
+            "title": {"text": title},
+        },
+        {
+            "element_type": "description",
+            "description": {
+                "format": 1,
+                "text": description,
+            },
+        },
+    ]
+    if buttons:
+        elements.append(
+            {
+                "element_type": "button_group",
+                "button_group": buttons,
+            }
+        )
+
     return {
         "tag": "interactive_message",
         "interactive_message": {
-            "elements": [
-                {
-                    "element_type": "title",
-                    "title": {"text": title},
-                },
-                {
-                    "element_type": "description",
-                    "description": {
-                        "format": 1,
-                        "text": description,
-                    },
-                },
-                {
-                    "element_type": "button_group",
-                    "button_group": buttons,
-                },
-            ]
+            "elements": elements
         },
     }
 
@@ -51,4 +56,12 @@ def build_report_interactive_payload(package: dict) -> dict:
         title=title,
         description="Mo nhanh phan du lieu can xem them.",
         actions=list(package.get("interactiveActions") or []),
+    )
+
+
+def build_callback_report_payload(*, title: str, summary: str) -> dict:
+    return build_interactive_payload(
+        title=title,
+        description=summary,
+        actions=[],
     )
