@@ -166,6 +166,7 @@ jobs:
             --build-configured-reports \
             --load-store outputs/ffvn_master.sqlite \
             --save-report outputs/ffvn_master_reports.json \
+            --save-rendered-dir outputs/rendered_reports \
             --send-seatalk
 
       - name: Build job summary
@@ -183,6 +184,8 @@ jobs:
               raise SystemExit(0)
 
           report = json.loads(path.read_text(encoding="utf-8"))
+          preview_dir = Path("outputs/rendered_reports")
+          preview_files = sorted(item.name for item in preview_dir.glob("*.txt")) if preview_dir.exists() else []
           lines = [
               "# FFVN Daily Send",
               "",
@@ -194,6 +197,7 @@ jobs:
               f"- Sent: `{report.get('summary', {}).get('sent', 0)}`",
               f"- Skipped: `{report.get('summary', {}).get('skipped', 0)}`",
               f"- Failed: `{report.get('summary', {}).get('failed', 0)}`",
+              f"- Rendered previews: `{len(preview_files)}`",
           ]
           for item in report.get("packageSummaries", []):
               lines.append(
@@ -208,6 +212,8 @@ jobs:
               )
               if item.get("reason"):
                   lines.append(f"  Reason: {item.get('reason')}")
+          for name in preview_files:
+              lines.append(f"- Preview file: `{name}`")
           summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
 
@@ -216,5 +222,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ffvn-daily-send-latest
-          path: outputs/ffvn_master_reports.json
+          path: |
+            outputs/ffvn_master_reports.json
+            outputs/rendered_reports
           if-no-files-found: warn

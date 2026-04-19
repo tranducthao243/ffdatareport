@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 import sys
 
 from app.pipeline import build_configured_reports, build_store_from_export
@@ -138,6 +139,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-config", type=Path, default=Path("config/reports.json"), help="Reports config JSON path.")
     parser.add_argument("--campaigns-config", type=Path, default=Path("config/campaigns.json"), help="Campaigns config JSON path.")
     parser.add_argument("--save-report", type=Path, help="Optional path to save report JSON.")
+    parser.add_argument(
+        "--save-rendered-dir",
+        type=Path,
+        help="Optional directory to save rendered Seatalk text previews for each configured report package.",
+    )
     parser.add_argument("--debug", action="store_true", help="Enable verbose debug logging.")
     parser.add_argument("--log-file", type=Path, help="Optional path to write runtime logs.")
     parser.add_argument("--status-file", type=Path, help="Optional path to write runtime status JSON.")
@@ -176,6 +182,28 @@ def update_status(status: dict, phase: str, **fields: object) -> None:
     status["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     for key, value in fields.items():
         status[key] = value
+
+
+def slugify_filename(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-")
+    return normalized or "report"
+
+
+def persist_rendered_packages(rendered_dir: Path | None, payload: dict) -> list[str]:
+    if not rendered_dir:
+        return []
+
+    rendered_dir.mkdir(parents=True, exist_ok=True)
+    saved_paths: list[str] = []
+    for package in payload.get("packages", []):
+        rendered_text = str(package.get("renderedText") or "").strip()
+        if not rendered_text:
+            continue
+        file_name = f"{slugify_filename(package.get('groupName', 'report'))}.txt"
+        path = rendered_dir / file_name
+        path.write_text(rendered_text + "\n", encoding="utf-8")
+        saved_paths.append(str(path))
+    return saved_paths
 
 
 def main() -> int:
@@ -302,6 +330,9 @@ def main() -> int:
             if args.save_report:
                 args.save_report.parent.mkdir(parents=True, exist_ok=True)
                 args.save_report.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+            rendered_paths = persist_rendered_packages(args.save_rendered_dir, payload)
+            if rendered_paths:
+                LOGGER.info("Saved %s rendered report preview(s) to %s", len(rendered_paths), args.save_rendered_dir)
             update_status(status, "completed", exit_code=0, package_count=payload.get("packageCount", 0))
             write_status(args.status_file, status)
             print(json.dumps(payload, ensure_ascii=False, indent=2))
