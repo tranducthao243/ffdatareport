@@ -3,6 +3,7 @@ from unittest.mock import Mock, patch
 
 from datasocial.formatter import render_seatalk_report
 from seatalk.callbacks import extract_click_value, parse_click_payload
+from seatalk.callback_server import build_runtime
 from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
 
@@ -69,6 +70,28 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         event = {"action": {"value": '{"action":"open_report"}'}}
 
         self.assertEqual(extract_click_value(event), '{"action":"open_report"}')
+
+    def test_callback_server_build_runtime_reads_preset_data(self):
+        class Args:
+            db_path = "outputs/ffvn_master.sqlite"
+            groups_config = "config/groups.json"
+            reports_config = "config/reports.json"
+            campaigns_config = "config/campaigns.json"
+            preset = "ffvn_master_daily"
+            report_mode = "today_so_far"
+            report_timezone = "Asia/Ho_Chi_Minh"
+            repo = "tranducthao243/ffdatareport"
+            artifact_name = "ffvn-daily-fetch-latest"
+            artifact_token = ""
+            sync_on_start = False
+            sync_on_click = False
+            verify_signature = False
+            signing_secret = ""
+
+        runtime = build_runtime(Args())
+
+        self.assertIn(13, runtime["preset_category_ids"])
+        self.assertIn(1, runtime["preset_platform_ids"])
 
     @patch("seatalk.sender.build_seatalk_client")
     def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):

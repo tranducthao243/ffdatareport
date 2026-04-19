@@ -77,13 +77,14 @@ def verify_signature(raw_body: bytes, signing_secret: str, received_signature: s
 
 def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     preset = load_preset(args.preset)
+    preset_data = preset.data
     return {
         "db_path": args.db_path,
         "groups_config": args.groups_config,
         "reports_config": args.reports_config,
         "campaigns_config": args.campaigns_config,
-        "preset_category_ids": list(preset.get("category_ids") or []),
-        "preset_platform_ids": list(preset.get("platform_ids") or []),
+        "preset_category_ids": list(preset_data.get("category_ids") or []),
+        "preset_platform_ids": list(preset_data.get("platform_ids") or []),
         "report_mode": args.report_mode,
         "report_timezone": args.report_timezone,
         "repo": args.repo,
