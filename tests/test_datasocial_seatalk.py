@@ -34,9 +34,9 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         self.assertEqual(payload["tag"], "interactive_message")
         elements = payload["interactive_message"]["elements"]
-        self.assertEqual(elements[0]["tag"], "title")
-        self.assertEqual(elements[1]["tag"], "description")
-        self.assertEqual(elements[2]["tag"], "button_group")
+        self.assertEqual(elements[0]["element_type"], "title")
+        self.assertEqual(elements[1]["element_type"], "description")
+        self.assertEqual(elements[2]["element_type"], "button_group")
         self.assertEqual(len(elements[2]["buttons"]), 2)
         self.assertEqual(elements[2]["buttons"][0]["button_type"], "callback")
 

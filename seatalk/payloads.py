@@ -15,7 +15,7 @@ def build_interactive_payload(
     for action in actions[:5]:
         buttons.append(
             {
-                "text": action.get("label", "Open"),
+                "text": {"text": action.get("label", "Open")},
                 "button_type": "callback",
                 "value": action.get("callbackPayload", ""),
             }
@@ -26,15 +26,15 @@ def build_interactive_payload(
         "interactive_message": {
             "elements": [
                 {
-                    "tag": "title",
-                    "title": {"text": title},
+                    "element_type": "title",
+                    "text": {"text": title},
                 },
                 {
-                    "tag": "description",
-                    "description": {"text": description},
+                    "element_type": "description",
+                    "text": {"text": description},
                 },
                 {
-                    "tag": "button_group",
+                    "element_type": "button_group",
                     "buttons": buttons,
                 },
             ]
