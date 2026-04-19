@@ -19,7 +19,6 @@ import requests
 from app.pipeline import build_report_package_by_code
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
-from report.renderers import render_callback_summary
 
 from .auth import build_seatalk_client
 from .callbacks import (
@@ -28,7 +27,6 @@ from .callbacks import (
     extract_click_value,
     parse_click_payload,
 )
-from .payloads import build_callback_report_payload
 
 
 LOGGER = logging.getLogger("seatalk.callback_server")
@@ -245,10 +243,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 now=datetime.now(),
             )
             message_text = str(package.get("renderedText") or "").strip()
-            message_card = build_callback_report_payload(
-                title=str(package.get("title") or package.get("reportCode") or "Bao cao").strip(),
-                summary=render_callback_summary(package),
-            )
             group_id = callback_context["group_id"]
             thread_id = callback_context["thread_id"] or callback_context["message_id"]
             quoted_message_id = callback_context["message_id"] or callback_context["quoted_message_id"]
@@ -262,7 +256,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         thread_id=thread_id,
                         quoted_message_id=quoted_message_id,
                     )
-                    group_client.send_interactive(message_card)
+                    group_client.send_text(message_text)
                     LOGGER.info(
                         "Seatalk callback reply sent to group context | group_id=%s | thread_id=%s | quoted_message_id=%s",
                         group_id,
@@ -283,11 +277,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 app_secret=runtime["seatalk_app_secret"],
                 employee_code=employee_code,
             )
-            try:
-                client.send_interactive(message_card)
-            except Exception:
-                LOGGER.exception("Seatalk private callback card failed; falling back to text reply")
-                client.send_text(message_text)
+            client.send_text(message_text)
             LOGGER.info("Seatalk callback reply sent as private message | employee_code=%s", employee_code)
 
         def _read_body(self) -> bytes:

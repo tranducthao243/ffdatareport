@@ -5,11 +5,7 @@ from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
 from seatalk.callbacks import build_callback_context, extract_click_value, parse_click_payload
 from seatalk.callback_server import build_runtime
-from seatalk.payloads import (
-    build_callback_report_payload,
-    build_interactive_payload,
-    build_report_interactive_payload,
-)
+from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
 
 
@@ -64,17 +60,6 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         elements = payload["interactive_message"]["elements"]
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
         self.assertEqual(elements[1]["description"]["text"], "Mo nhanh phan du lieu can xem them.")
-
-    def test_build_callback_report_payload_omits_button_group(self):
-        payload = build_callback_report_payload(
-            title="Bao cao campaign FFVN",
-            summary="Tong view: 10.2M | Tong clip: 12",
-        )
-
-        elements = payload["interactive_message"]["elements"]
-        self.assertEqual(len(elements), 2)
-        self.assertEqual(elements[0]["element_type"], "title")
-        self.assertEqual(elements[1]["element_type"], "description")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
