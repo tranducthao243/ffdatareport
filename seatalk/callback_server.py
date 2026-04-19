@@ -18,6 +18,7 @@ import requests
 
 from app.pipeline import build_report_package_by_code
 from app.config_loader import load_json
+from app.data_chat import answer_data_question
 from app.health import (
     build_health_snapshot,
     classify_private_command,
@@ -406,10 +407,22 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `campaign`: bao cao campaign hien tai\n"
                     "- `official`: bao cao kenh Official\n"
                     "- `refresh`: dong bo artifact moi nhat roi tra lai thong tin du lieu\n"
-                    "- `help`: hien menu nay"
+                    "- `help`: hien menu nay\n"
+                    "\n"
+                    "*Ban cung co the hoi truc tiep du lieu, vi du:*\n"
+                    "- `Jeeker da dang bao nhieu clip trong thang nay`\n"
+                    "- `Bac Gau thang nay co bao nhieu clip trieu view`"
                 )
             else:
-                reply_text = format_health_report(health_snapshot)
+                reply_text = answer_data_question(
+                    runtime["db_path"],
+                    message_text,
+                    now=datetime.now(),
+                ) or (
+                    "**Toi chua hieu cau hoi nay**\n"
+                    "*Thu lai bang mot lenh nhu `health`, `campaign`, `official` "
+                    "hoac mot cau hoi du lieu cu the.*"
+                )
 
             private_client.send_text(reply_text)
             LOGGER.info(

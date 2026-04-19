@@ -56,7 +56,7 @@ def classify_private_command(text: str) -> str:
         return "official"
     if normalized in {"refresh", "sync", "lam moi", "dong bo"}:
         return "refresh"
-    return "help"
+    return "unknown"
 
 
 def list_active_campaigns(campaigns_config: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
@@ -281,4 +281,3 @@ def format_health_alert(snapshot: dict[str, Any]) -> str:
     for issue in snapshot.get("issues") or []:
         lines.append(f"- {issue['message']}")
     return "\n".join(lines).strip()
-
