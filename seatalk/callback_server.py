@@ -244,7 +244,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             message_text = str(package.get("renderedText") or "").strip()
             group_id = callback_context["group_id"]
-            thread_id = callback_context["thread_id"]
+            thread_id = callback_context["thread_id"] or callback_context["message_id"]
             quoted_message_id = callback_context["message_id"] or callback_context["quoted_message_id"]
 
             if group_id:
