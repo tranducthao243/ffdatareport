@@ -24,6 +24,7 @@ from .auth import build_seatalk_client
 from .callbacks import (
     SeatalkCallbackError,
     build_callback_context,
+    extract_click_value,
     parse_click_payload,
 )
 
