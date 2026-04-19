@@ -23,8 +23,7 @@ from datasocial.presets import load_preset
 from .auth import build_seatalk_client
 from .callbacks import (
     SeatalkCallbackError,
-    extract_click_value,
-    extract_sender_employee_code,
+    build_callback_context,
     parse_click_payload,
 )
 
@@ -182,6 +181,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     return
 
             payload = self._load_json(raw_body)
+            LOGGER.info("Seatalk callback payload | %s", json.dumps(payload, ensure_ascii=False, sort_keys=True))
             event_type = str(payload.get("event_type") or "").strip()
             event = payload.get("event") or {}
 
@@ -204,7 +204,12 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             LOGGER.info("%s - %s", self.address_string(), format % args)
 
         def _handle_interactive_click(self, event: dict[str, Any]) -> None:
-            employee_code = extract_sender_employee_code(event)
+            callback_context = build_callback_context(event)
+            LOGGER.info(
+                "Seatalk callback context | %s",
+                json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
+            )
+            employee_code = callback_context["employee_code"]
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in callback event.")
             if not runtime["seatalk_app_id"] or not runtime["seatalk_app_secret"]:
@@ -236,12 +241,43 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 },
                 now=datetime.now(),
             )
+            message_text = str(package.get("renderedText") or "").strip()
+            group_id = callback_context["group_id"]
+            thread_id = callback_context["thread_id"]
+            quoted_message_id = callback_context["message_id"] or callback_context["quoted_message_id"]
+
+            if group_id:
+                try:
+                    group_client = build_seatalk_client(
+                        app_id=runtime["seatalk_app_id"],
+                        app_secret=runtime["seatalk_app_secret"],
+                        group_id=group_id,
+                        thread_id=thread_id,
+                        quoted_message_id=quoted_message_id,
+                    )
+                    group_client.send_text(message_text)
+                    LOGGER.info(
+                        "Seatalk callback reply sent to group context | group_id=%s | thread_id=%s | quoted_message_id=%s",
+                        group_id,
+                        thread_id or "-",
+                        quoted_message_id or "-",
+                    )
+                    return
+                except Exception:
+                    LOGGER.exception(
+                        "Seatalk group/thread reply failed; falling back to private reply | group_id=%s | thread_id=%s | quoted_message_id=%s",
+                        group_id,
+                        thread_id or "-",
+                        quoted_message_id or "-",
+                    )
+
             client = build_seatalk_client(
                 app_id=runtime["seatalk_app_id"],
                 app_secret=runtime["seatalk_app_secret"],
                 employee_code=employee_code,
             )
-            client.send_text(str(package.get("renderedText") or "").strip())
+            client.send_text(message_text)
+            LOGGER.info("Seatalk callback reply sent as private message | employee_code=%s", employee_code)
 
         def _read_body(self) -> bytes:
             length = int(self.headers.get("Content-Length", "0") or "0")

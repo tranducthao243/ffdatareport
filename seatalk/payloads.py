@@ -49,6 +49,6 @@ def build_report_interactive_payload(package: dict) -> dict:
     title = str(package.get("title") or package.get("reportCode") or "Report").strip()
     return build_interactive_payload(
         title=title,
-        description="Chon du lieu muon xem them.",
+        description="Mo nhanh phan du lieu can xem them.",
         actions=list(package.get("interactiveActions") or []),
     )

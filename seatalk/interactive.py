@@ -14,7 +14,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
 
     return [
         {
-            "label": "Data Campaign",
+            "label": "Xem campaign",
             "actionType": "open_report",
             "targetReportCode": "TOPD_REPORT",
             "callbackPayload": encode_callback_payload(
@@ -28,7 +28,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             ),
         },
         {
-            "label": "Official Channel",
+            "label": "Xem kenh Official",
             "actionType": "open_report",
             "targetReportCode": "TOPF_REPORT",
             "callbackPayload": encode_callback_payload(

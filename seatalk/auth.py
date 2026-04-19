@@ -9,11 +9,15 @@ def build_seatalk_client(
     app_secret: str,
     group_id: str = "",
     employee_code: str = "",
+    thread_id: str = "",
+    quoted_message_id: str = "",
 ) -> SeaTalkClient:
     settings = SeaTalkSettings(
         app_id=app_id,
         app_secret=app_secret,
         group_id=group_id,
         employee_code=employee_code,
+        thread_id=thread_id,
+        quoted_message_id=quoted_message_id,
     )
     return SeaTalkClient(settings)

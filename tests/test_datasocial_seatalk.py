@@ -2,7 +2,8 @@ import unittest
 from unittest.mock import Mock, patch
 
 from datasocial.formatter import render_seatalk_report
-from seatalk.callbacks import extract_click_value, parse_click_payload
+from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
+from seatalk.callbacks import build_callback_context, extract_click_value, parse_click_payload
 from seatalk.callback_server import build_runtime
 from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
@@ -58,7 +59,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         elements = payload["interactive_message"]["elements"]
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
-        self.assertEqual(elements[1]["description"]["text"], "Chon du lieu muon xem them.")
+        self.assertEqual(elements[1]["description"]["text"], "Mo nhanh phan du lieu can xem them.")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
@@ -70,6 +71,22 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         event = {"action": {"value": '{"action":"open_report"}'}}
 
         self.assertEqual(extract_click_value(event), '{"action":"open_report"}')
+
+    def test_build_callback_context_collects_thread_metadata(self):
+        event = {
+            "group_id": "group-1",
+            "message_id": "message-1",
+            "thread_id": "thread-1",
+            "employee_code": "emp-1",
+            "button": {"value": '{"action":"open_report"}'},
+        }
+
+        context = build_callback_context(event)
+
+        self.assertEqual(context["group_id"], "group-1")
+        self.assertEqual(context["message_id"], "message-1")
+        self.assertEqual(context["thread_id"], "thread-1")
+        self.assertEqual(context["employee_code"], "emp-1")
 
     def test_callback_server_build_runtime_reads_preset_data(self):
         class Args:
@@ -92,6 +109,29 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         self.assertIn(13, runtime["preset_category_ids"])
         self.assertIn(1, runtime["preset_platform_ids"])
+
+    def test_group_send_includes_thread_fields_when_present(self):
+        client = SeaTalkClient(
+            SeaTalkSettings(
+                app_id="app",
+                app_secret="secret",
+                group_id="group-1",
+                thread_id="thread-1",
+                quoted_message_id="message-1",
+            )
+        )
+        client.token = "token"
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {"code": 0}
+        client.session.post = Mock(return_value=response)
+
+        client.send_text("hello")
+
+        _, kwargs = client.session.post.call_args
+        self.assertEqual(kwargs["json"]["group_id"], "group-1")
+        self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
+        self.assertEqual(kwargs["json"]["quoted_message_id"], "message-1")
 
     @patch("seatalk.sender.build_seatalk_client")
     def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):

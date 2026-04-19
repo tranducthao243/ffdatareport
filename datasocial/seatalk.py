@@ -21,6 +21,8 @@ class SeaTalkSettings:
     app_secret: str
     group_id: str = ""
     employee_code: str = ""
+    thread_id: str = ""
+    quoted_message_id: str = ""
     use_markdown: bool = True
     usable_platform: str = "all"
 
@@ -75,6 +77,10 @@ class SeaTalkClient:
 
         if self.settings.group_id:
             payload = {"group_id": self.settings.group_id, **message_payload}
+            if self.settings.thread_id:
+                payload["thread_id"] = self.settings.thread_id
+            if self.settings.quoted_message_id:
+                payload["quoted_message_id"] = self.settings.quoted_message_id
             url = f"{SEATALK_OPENAPI_BASE}/messaging/v2/group_chat"
         elif self.settings.employee_code:
             payload = {
