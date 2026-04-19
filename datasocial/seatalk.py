@@ -52,20 +52,26 @@ class SeaTalkClient:
         return token
 
     def send_text(self, content: str) -> dict[str, Any]:
-        token = self.token or self.get_app_access_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
-        message_payload = {
-            "message": {
+        return self.send_message(
+            {
                 "tag": "text",
                 "text": {
                     "format": 1 if self.settings.use_markdown else 2,
                     "content": content,
                 },
             }
+        )
+
+    def send_interactive(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self.send_message(payload)
+
+    def send_message(self, message: dict[str, Any]) -> dict[str, Any]:
+        token = self.token or self.get_app_access_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
         }
+        message_payload = {"message": message}
 
         if self.settings.group_id:
             payload = {"group_id": self.settings.group_id, **message_payload}
