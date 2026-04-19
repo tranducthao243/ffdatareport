@@ -219,7 +219,7 @@ jobs:
           for item in report.get("packageSummaries", []):
               lines.append(
                   f"- Package `{item.get('groupName', '-')}` -> `{item.get('reportCode', '-')}` "
-                  f"({item.get('sectionCount', 0)} sections, group_id={'yes' if item.get('hasResolvedGroupId') else 'no'})"
+                  f"({item.get('sectionCount', 0)} sections, actions={item.get('interactiveActionCount', 0)}, group_id={'yes' if item.get('hasResolvedGroupId') else 'no'})"
               )
           for item in report.get("validation", {}).get("warnings", []):
               lines.append(f"- Warning: {item.get('message', '-')}")

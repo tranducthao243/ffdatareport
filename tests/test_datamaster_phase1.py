@@ -184,18 +184,22 @@ class DataMasterPhase1Tests(unittest.TestCase):
             self.assertEqual(payload["summary"]["packagesBuilt"], 3)
             main_package = next(item for item in payload["packages"] if item["groupName"] == "main")
             self.assertEqual(main_package["reportCode"], "SO1")
+            self.assertEqual(len(main_package["interactiveActions"]), 2)
             topa = next(item for item in main_package["sections"] if item["code"] == "TOPA")
             self.assertEqual(topa["tiktok"][0]["view"], 500000)
             tope = next(item for item in main_package["sections"] if item["code"] == "TOPE")
             self.assertEqual(tope["totalViews"], 1000000)
             self.assertEqual(tope["totalClips"], 3)
+            self.assertNotIn("Interactive actions", main_package["renderedText"])
 
             campaign_package = next(item for item in payload["packages"] if item["groupName"] == "campaign")
+            self.assertEqual(campaign_package["interactiveActions"], [])
             topd = next(item for item in campaign_package["sections"] if item["code"] == "TOPD")
             self.assertEqual(topd["campaigns"][0]["totalViews"], 300000)
             self.assertEqual(topd["campaigns"][0]["totalClips"], 1)
 
             official_package = next(item for item in payload["packages"] if item["groupName"] == "official")
+            self.assertEqual(official_package["interactiveActions"], [])
             topf = next(item for item in official_package["sections"] if item["code"] == "TOPF")
             self.assertEqual(topf["platformTotals"]["facebook"]["totalViews"], 80000)
 

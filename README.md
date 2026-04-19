@@ -127,6 +127,7 @@ Production model hiện tại:
   - `outputs/ffvn_master.sqlite`
 - send workflow đọc SQLite và gửi report package theo config
 - send workflow cũng có thể chạy ở chế độ preview-only để chỉ build artifact mà không gửi SeaTalk
+- `SO1` package hiện đã có interactive action metadata cho bước bot callback sau này
 
 ## Required secrets
 

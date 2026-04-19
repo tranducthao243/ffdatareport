@@ -7,7 +7,7 @@ from typing import Any
 from datasocial.exceptions import DatasocialError
 from normalize import build_sqlite_store
 from report import build_report_packages, render_seatalk_package
-from seatalk import send_report_packages
+from seatalk import build_interactive_actions, send_report_packages
 
 from .config_loader import (
     format_validation_errors,
@@ -67,6 +67,7 @@ def build_configured_reports(
     for package in packages:
         group = group_lookup[package["groupName"]]
         package["resolvedGroupId"] = resolve_group_target(group)
+        package["interactiveActions"] = build_interactive_actions(package)
         package["renderedText"] = render_seatalk_package(package)
         package["sectionCodes"] = [section["code"] for section in package["sections"]]
         package["sectionCount"] = len(package["sections"])
@@ -86,6 +87,7 @@ def build_configured_reports(
             "sectionCodes": package["sectionCodes"],
             "sectionCount": package["sectionCount"],
             "hasResolvedGroupId": bool(package["resolvedGroupId"]),
+            "interactiveActionCount": len(package.get("interactiveActions", [])),
         }
         for package in packages
     ]

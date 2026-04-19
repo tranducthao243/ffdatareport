@@ -199,9 +199,19 @@ def persist_rendered_packages(rendered_dir: Path | None, payload: dict) -> list[
         rendered_text = str(package.get("renderedText") or "").strip()
         if not rendered_text:
             continue
+        preview_text = rendered_text
+        interactive_actions = package.get("interactiveActions") or []
+        if interactive_actions:
+            lines = [preview_text, "", "Interactive actions (planned):"]
+            for action in interactive_actions:
+                lines.append(
+                    f"- {action.get('label', '-')}: {action.get('targetReportCode', '-')}"
+                )
+                lines.append(f"  callback_payload: {action.get('callbackPayload', '')}")
+            preview_text = "\n".join(lines).strip()
         file_name = f"{slugify_filename(package.get('groupName', 'report'))}.txt"
         path = rendered_dir / file_name
-        path.write_text(rendered_text + "\n", encoding="utf-8")
+        path.write_text(preview_text + "\n", encoding="utf-8")
         saved_paths.append(str(path))
     return saved_paths
 
