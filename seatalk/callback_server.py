@@ -228,13 +228,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             target_report_code = str(click_payload.get("target_report_code") or "").strip()
             if not target_report_code:
                 raise SeatalkCallbackError("Missing target_report_code in callback payload.")
-            self._send_loading_hint(
-                runtime=runtime,
-                employee_code=employee_code,
-                group_id=group_id,
-                thread_id=thread_id,
-                quoted_message_id=quoted_message_id,
-            )
             if runtime["sync_on_click"]:
                 sync_store_from_github_artifact(runtime)
 
@@ -286,37 +279,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             client.send_text(message_text)
             LOGGER.info("Seatalk callback reply sent as private message | employee_code=%s", employee_code)
-
-        def _send_loading_hint(
-            self,
-            *,
-            runtime: dict[str, Any],
-            employee_code: str,
-            group_id: str,
-            thread_id: str,
-            quoted_message_id: str,
-        ) -> None:
-            loading_text = "*Dang tai du lieu, vui long doi trong it giay...*"
-            try:
-                if group_id:
-                    loading_client = build_seatalk_client(
-                        app_id=runtime["seatalk_app_id"],
-                        app_secret=runtime["seatalk_app_secret"],
-                        group_id=group_id,
-                        thread_id=thread_id,
-                        quoted_message_id=quoted_message_id,
-                    )
-                    loading_client.send_text(loading_text)
-                    return
-
-                loading_client = build_seatalk_client(
-                    app_id=runtime["seatalk_app_id"],
-                    app_secret=runtime["seatalk_app_secret"],
-                    employee_code=employee_code,
-                )
-                loading_client.send_text(loading_text)
-            except Exception:
-                LOGGER.exception("Seatalk loading hint failed")
 
         def _read_body(self) -> bytes:
             length = int(self.headers.get("Content-Length", "0") or "0")
