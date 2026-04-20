@@ -52,10 +52,6 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "action": "reply_text",
                     "target_report_code": "TREND_DANCE_REPORT",
-                    "message": "Trend nhảy đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.",
-                    "source_report_code": report_code,
-                    "group_name": group_name,
-                    "generated_at": generated_at,
                 }
             ),
         },
@@ -68,10 +64,6 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "action": "reply_text",
                     "target_report_code": "TREND_SITUATION_REPORT",
-                    "message": "Trend tình huống đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.",
-                    "source_report_code": report_code,
-                    "group_name": group_name,
-                    "generated_at": generated_at,
                 }
             ),
         },

@@ -41,6 +41,18 @@ from .callbacks import (
 LOGGER = logging.getLogger("seatalk.callback_server")
 
 
+TREND_PLACEHOLDER_MESSAGES = {
+    "TREND_DANCE_REPORT": (
+        "**Trend nhảy**\n"
+        "*Dữ liệu trend nhảy đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.*"
+    ),
+    "TREND_SITUATION_REPORT": (
+        "**Trend tình huống**\n"
+        "*Dữ liệu trend tình huống đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.*"
+    ),
+}
+
+
 def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
     admin_codes = set(runtime.get("admin_employee_codes") or [])
     admin_emails = set(runtime.get("admin_emails") or [])
@@ -344,6 +356,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             if action == "reply_text":
                 message_text = str(click_payload.get("message") or "").strip()
+                if not message_text:
+                    message_text = TREND_PLACEHOLDER_MESSAGES.get(
+                        target_report_code,
+                        (
+                            "**Thông tin đang được cập nhật**\n"
+                            "*Tôi sẽ mở nội dung này ngay khi dữ liệu sẵn sàng.*"
+                        ),
+                    )
             else:
                 package = build_report_package_by_code(
                     runtime["db_path"],
