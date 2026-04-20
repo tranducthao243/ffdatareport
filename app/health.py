@@ -54,7 +54,7 @@ def classify_private_command(text: str) -> str:
     normalized = normalize_command_text(text)
     if not normalized:
         return "help"
-    if normalized in {"help", "/help", "menu", "/menu", "lenh", "commands"}:
+    if normalized in {".", "help", "/help", "menu", "/menu", "lenh", "commands"}:
         return "help"
     if normalized in {"health", "status", "summary", "health check"}:
         return "health"

@@ -491,10 +491,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
                 reply_text = (
-                    "**Lệnh bot private**\n"
-                    "*Dùng các lệnh sau để thao tác nhanh với bot.*\n"
+                    "**LỆNH BOT PRIVATE**\n"
+                    "*Gõ `.` để mở nhanh menu này.*\n"
                     "\n"
-                    "**Check data**\n"
+                    "**Kiểm tra dữ liệu**\n"
                     "- `health`: tổng quan tình trạng dữ liệu\n"
                     "- `data`: kho dữ liệu đang dùng\n"
                     "- `scope`: source scope hiện tại\n"
@@ -505,7 +505,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "**Dữ liệu và tiện ích**\n"
                     "- `webcompany`: liệt kê các link web quan trọng của team\n"
                     "\n"
-                    "**Tính năng sắp update**\n"
+                    "**Tính năng sắp cập nhật**\n"
                     "- `shortlink`: tạo shortlink từ link và config\n"
                     "- `uploadimage`: tải ảnh lên web nội bộ và trả link ảnh\n"
                     "- `enhanceimage`: làm nét ảnh rồi trả kết quả\n"
