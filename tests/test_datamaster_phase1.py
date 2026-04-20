@@ -4,6 +4,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
+from app.health import format_health_alert
 from app.pipeline import build_configured_reports, build_store_from_export
 from datasocial.exceptions import DatasocialError
 from datasocial.exporter import export_rows_to_csv_bytes
@@ -241,6 +242,8 @@ class DataMasterPhase1Tests(unittest.TestCase):
             self.assertEqual(topd["campaigns"][0]["totalViews"], 300000)
             self.assertEqual(topd["campaigns"][0]["totalClips"], 1)
             self.assertIn("historyCompare", topd["campaigns"][0])
+            self.assertEqual(topd["campaigns"][0]["topKolsWithoutCampaign"][0]["channelName"], "KOL TikTok 1")
+            self.assertEqual(topd["campaigns"][0]["topKolsWithoutCampaign"][1]["channelName"], "KOL YouTube 1")
 
             official_package = next(item for item in payload["packages"] if item["groupName"] == "official")
             self.assertEqual(official_package["interactiveActions"], [])
@@ -471,6 +474,10 @@ class DataMasterPhase1Tests(unittest.TestCase):
             self.assertTrue(payload["dataHealth"]["blockSend"])
             issue_codes = {item["code"] for item in payload["dataHealth"]["issues"]}
             self.assertIn("official_missing_data", issue_codes)
+            alert_text = format_health_alert(payload["dataHealth"])
+            self.assertIn("**Canh bao du lieu FFVN**", alert_text)
+            self.assertIn("**Nghiem trong**", alert_text)
+            self.assertIn("Official mat data", alert_text)
 
 
 if __name__ == "__main__":

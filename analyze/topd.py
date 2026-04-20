@@ -58,6 +58,50 @@ def analyze_topd(
         coverage_warning = (
             "Du lieu campaign co the chua day du vi ngay bat dau campaign nam ngoai cua so fetch hien tai."
         )
+    kol_start, kol_end = build_days_window(7, mode=mode, timezone_name=timezone_name, now=now)
+    recent_kol_posts = filter_posts(
+        posts,
+        start_date=kol_start,
+        end_date=kol_end,
+        platforms=KOL_PLATFORMS,
+        require_kol=True,
+    )
+    non_participant_channels: dict[tuple[str, str, str], dict[str, object]] = {}
+    for post in recent_kol_posts:
+        key = (post.platform, post.channel_id, post.channel_name)
+        entry = non_participant_channels.setdefault(
+            key,
+            {
+                "platform": post.platform,
+                "channelId": post.channel_id,
+                "channelName": post.channel_name,
+                "totalViews": 0,
+                "totalClips": 0,
+                "hasCampaignHashtag": False,
+            },
+        )
+        entry["totalViews"] = int(entry["totalViews"]) + post.view
+        entry["totalClips"] = int(entry["totalClips"]) + 1
+        if set(post.hashtags) & tags:
+            entry["hasCampaignHashtag"] = True
+    top_kols_without_campaign = [
+        {
+            "platform": str(item["platform"]),
+            "channelId": str(item["channelId"]),
+            "channelName": str(item["channelName"]),
+            "totalViews": int(item["totalViews"]),
+            "totalClips": int(item["totalClips"]),
+        }
+        for item in sorted(
+            (
+                value
+                for value in non_participant_channels.values()
+                if not bool(value["hasCampaignHashtag"])
+            ),
+            key=lambda item: (int(item["totalViews"]), int(item["totalClips"])),
+            reverse=True,
+        )[:5]
+    ]
     return {
         "code": "TOPD",
         "title": "TOPD",
@@ -76,4 +120,6 @@ def analyze_topd(
         "daysLeft": days_left,
         "coverageWarning": coverage_warning,
         "daysElapsed": days_elapsed,
+        "topKolsWithoutCampaignWindow": {"from": kol_start.isoformat(), "to": kol_end.isoformat()},
+        "topKolsWithoutCampaign": top_kols_without_campaign,
     }

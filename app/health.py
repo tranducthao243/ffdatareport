@@ -32,6 +32,18 @@ def compact_number(value: int) -> str:
     return str(value)
 
 
+def format_issue_label(code: str) -> str:
+    labels = {
+        "store_empty": "Kho du lieu dang rong",
+        "official_scope_missing": "Official scope bi thieu",
+        "official_missing_data": "Official mat data",
+        "campaign_missing_data": "Campaign mat data",
+        "campaign_kpi_low": "Campaign dang tut KPI",
+        "clip_drop_anomaly": "So clip giam bat thuong",
+    }
+    return labels.get(code, code.replace("_", " ").strip().title())
+
+
 def normalize_command_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text or "")
     ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
@@ -175,10 +187,10 @@ def build_health_snapshot(
                             }
                         )
 
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, str, str]] = set()
     deduped: list[dict[str, str]] = []
     for issue in issues:
-        key = (issue["severity"], issue["code"])
+        key = (issue["severity"], issue["code"], issue["message"])
         if key in seen:
             continue
         seen.add(key)
@@ -275,11 +287,46 @@ def format_campaign_status_report(snapshot: dict[str, Any]) -> str:
 
 
 def format_health_alert(snapshot: dict[str, Any]) -> str:
+    store = snapshot.get("storeSummary", {})
+    critical_issues = [item for item in (snapshot.get("issues") or []) if item.get("severity") == "critical"]
+    warning_issues = [item for item in (snapshot.get("issues") or []) if item.get("severity") == "warning"]
+    active_campaigns = snapshot.get("activeCampaigns") or []
     lines = [
-        "**Canh bao gui group da bi chan**",
-        "*Bot tam dung gui bao cao vao group vi du lieu hien tai dang co van de.*",
+        "**Canh bao du lieu FFVN**",
+        "*Bot tam dung gui bao cao vao group vi phat hien van de trong bo du lieu hien tai.*",
         "",
+        f"- Cap nhat lan cuoi: `{store.get('lastInsertedAt') or snapshot.get('generatedAt', '-')}`",
+        f"- Du lieu dang bao phu: `{store.get('minPublishedDate') or '-'} -> {store.get('maxPublishedDate') or '-'}`",
+        f"- Tong bai viet: {store.get('postCount', 0)} | Tong kenh: {store.get('channelCount', 0)}",
     ]
-    for issue in snapshot.get("issues") or []:
-        lines.append(f"- {issue['message']}")
+    if active_campaigns:
+        lines.append("- Campaign dang active: " + ", ".join(item.get("name", "-") for item in active_campaigns))
+    lines.extend(
+        [
+            "",
+            "**Nghiem trong**",
+        ]
+    )
+    if critical_issues:
+        for issue in critical_issues:
+            lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
+    else:
+        lines.append("- Khong co loi nghiem trong.")
+    lines.extend(
+        [
+            "",
+            "**Canh bao / Theo doi them**",
+        ]
+    )
+    if warning_issues:
+        for issue in warning_issues:
+            lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
+    else:
+        lines.append("- Khong co canh bao can theo doi them.")
+    lines.extend(
+        [
+            "",
+            "*Neu can mo quyen bot hoac kiem tra lai nguon du lieu, vui long lien he ducthao.tran@garena.vn.*",
+        ]
+    )
     return "\n".join(lines).strip()

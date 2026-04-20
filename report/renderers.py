@@ -91,6 +91,19 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                 lines.append(f"     {item['url']}")
         else:
             lines.append("  - Chua co du lieu.")
+        lines.append(
+            "  *KOL noi bat 7 ngay qua chua tham gia campaign:* "
+            f"`{campaign.get('topKolsWithoutCampaignWindow', {}).get('from', '-')}"
+            f" -> {campaign.get('topKolsWithoutCampaignWindow', {}).get('to', '-')}`"
+        )
+        top_kols_without_campaign = campaign.get("topKolsWithoutCampaign", [])
+        if top_kols_without_campaign:
+            for index, item in enumerate(top_kols_without_campaign, start=1):
+                lines.append(
+                    f"  {index}. {item['channelName']} | {compact_number(item['totalViews'])} view | {item['totalClips']} clip"
+                )
+        else:
+            lines.append("  - Khong co KOL noi bat nao dang nam ngoai campaign.")
     return lines
 
 
