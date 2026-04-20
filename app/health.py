@@ -70,6 +70,14 @@ def classify_private_command(text: str) -> str:
         return "refresh"
     if normalized in {"webcompany", "web", "link", "links"}:
         return "webcompany"
+    if normalized in {"shortlink", "link ngan", "tao shortlink", "rut gon link"}:
+        return "shortlink"
+    if normalized in {"uploadimage", "upload anh", "gui anh len web", "up anh"}:
+        return "uploadimage"
+    if normalized in {"enhanceimage", "lam net anh", "lam net", "upscale"}:
+        return "enhanceimage"
+    if normalized in {"removebg", "tach nen", "xoa nen", "remove background"}:
+        return "removebg"
     return "unknown"
 
 

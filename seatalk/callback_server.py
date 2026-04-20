@@ -52,6 +52,11 @@ TREND_PLACEHOLDER_MESSAGES = {
     ),
 }
 
+PRIVATE_FUTURE_FEATURE_MESSAGE = (
+    "**Đang check và sẽ cập nhật tính năng sau**\n"
+    "*Tính năng này đã được ghi nhận trong roadmap của bot.*"
+)
+
 
 def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
     admin_codes = set(runtime.get("admin_employee_codes") or [])
@@ -482,6 +487,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                             if item.get("note"):
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
+            elif command in {"shortlink", "uploadimage", "enhanceimage", "removebg"}:
+                reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
                 reply_text = (
                     "**Lệnh bot private**\n"
@@ -493,6 +500,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `official`: báo cáo kênh Official\n"
                     "- `refresh`: đồng bộ artifact mới nhất rồi trả lại thông tin dữ liệu\n"
                     "- `webcompany`: liệt kê các link web quan trọng của team\n"
+                    "- `shortlink`: tạo shortlink từ link và config\n"
+                    "- `uploadimage`: tải ảnh lên web nội bộ và trả link ảnh\n"
+                    "- `enhanceimage`: làm nét ảnh rồi trả kết quả\n"
+                    "- `removebg`: tách nền ảnh và trả lại ảnh\n"
                     "- `help`: hiện menu này\n"
                     "\n"
                     "*Bạn cũng có thể hỏi trực tiếp dữ liệu, ví dụ:*\n"
