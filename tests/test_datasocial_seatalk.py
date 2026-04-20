@@ -62,7 +62,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
         self.assertEqual(elements[1]["description"]["text"], "Mo nhanh phan du lieu can xem them.")
 
-    def test_build_interactive_groups_splits_campaign_and_trend_cards(self):
+    def test_build_interactive_groups_merges_campaign_and_trend_into_one_card(self):
         package = {
             "reportCode": "SO1",
             "groupName": "main",
@@ -72,14 +72,13 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         groups = build_interactive_groups(package)
 
-        self.assertEqual(len(groups), 2)
+        self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["title"], "Mo rong bao cao")
-        self.assertEqual(len(groups[0]["actions"]), 2)
-        self.assertEqual(groups[1]["title"], "Kiem tra trend")
-        self.assertEqual(len(groups[1]["actions"]), 2)
+        self.assertEqual(len(groups[0]["actions"]), 4)
+        self.assertIn("trend nhay", groups[0]["description"].lower())
 
-        payload = build_interactive_group_payload(groups[1])
-        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Kiem tra trend")
+        payload = build_interactive_group_payload(groups[0])
+        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Mo rong bao cao")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
@@ -241,7 +240,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         result = send_report_packages(packages, app_id="id", app_secret="secret")
 
         client.send_text.assert_called_once()
-        self.assertEqual(client.send_interactive.call_count, 2)
+        self.assertEqual(client.send_interactive.call_count, 1)
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")
 

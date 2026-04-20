@@ -82,28 +82,16 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     actions = list(package.get("interactiveActions") or [])
     if not actions:
         return []
-
-    grouped: list[dict[str, Any]] = []
-    campaign_actions = [item for item in actions if item.get("actionGroup") == "campaign_official"]
-    trend_actions = [item for item in actions if item.get("actionGroup") == "trend"]
-
-    if campaign_actions:
-        grouped.append(
-            {
-                "title": "Mo rong bao cao",
-                "description": "Nhan nut de nhan them du lieu Campaign hoac kenh Official qua tin nhan private.",
-                "actions": campaign_actions,
-            }
-        )
-    if trend_actions:
-        grouped.append(
-            {
-                "title": "Kiem tra trend",
-                "description": "Nhan nut de theo doi trend nhay va trend tinh huong khi du lieu duoc cap nhat.",
-                "actions": trend_actions,
-            }
-        )
-    return grouped
+    return [
+        {
+            "title": "Mo rong bao cao",
+            "description": (
+                "Nhan nut de nhan them du lieu Campaign, kenh Official, "
+                "trend nhay hoac trend tinh huong qua tin nhan private."
+            ),
+            "actions": actions[:5],
+        }
+    ]
 
 
 def encode_callback_payload(payload: dict[str, Any]) -> str:
