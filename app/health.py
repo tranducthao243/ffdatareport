@@ -34,12 +34,12 @@ def compact_number(value: int) -> str:
 
 def format_issue_label(code: str) -> str:
     labels = {
-        "store_empty": "Kho du lieu dang rong",
-        "official_scope_missing": "Official scope bi thieu",
-        "official_missing_data": "Official mat data",
-        "campaign_missing_data": "Campaign mat data",
-        "campaign_kpi_low": "Campaign dang tut KPI",
-        "clip_drop_anomaly": "So clip giam bat thuong",
+        "store_empty": "Kho dữ liệu đang rỗng",
+        "official_scope_missing": "Official scope bị thiếu",
+        "official_missing_data": "Official mất data",
+        "campaign_missing_data": "Campaign mất data",
+        "campaign_kpi_low": "Campaign đang tụt KPI",
+        "clip_drop_anomaly": "Số clip giảm bất thường",
     }
     return labels.get(code, code.replace("_", " ").strip().title())
 
@@ -117,7 +117,7 @@ def build_health_snapshot(
             {
                 "severity": "critical",
                 "code": "store_empty",
-                "message": "Kho du lieu SQLite dang rong, khong co bai viet nao de gui bao cao.",
+                "message": "Kho dữ liệu SQLite đang rỗng, không có bài viết nào để gửi báo cáo.",
             }
         )
 
@@ -127,7 +127,7 @@ def build_health_snapshot(
                 {
                     "severity": "critical",
                     "code": "official_scope_missing",
-                    "message": warning.get("message", "Official source scope dang thieu."),
+                    "message": warning.get("message", "Official source scope đang thiếu."),
                 }
             )
 
@@ -144,7 +144,7 @@ def build_health_snapshot(
                         {
                             "severity": "critical",
                             "code": "official_missing_data",
-                            "message": "Kenh Official khong co clip nao trong cua so tong hop 7 ngay.",
+                            "message": "Kênh Official không có clip nào trong cửa sổ tổng hợp 7 ngày.",
                         }
                     )
             elif code == "TOPD":
@@ -156,7 +156,7 @@ def build_health_snapshot(
                                 "code": "campaign_missing_data",
                                 "message": (
                                     f"Campaign {campaign.get('campaignName', '-')} dang khong co clip nao "
-                                    "trong cua so theo doi hien tai."
+                                    "trong cửa sổ theo dõi hiện tại."
                                 ),
                             }
                         )
@@ -166,8 +166,8 @@ def build_health_snapshot(
                                 "severity": "warning",
                                 "code": "campaign_kpi_low",
                                 "message": (
-                                    f"Campaign {campaign.get('campaignName', '-')} moi dat "
-                                    f"{campaign.get('kpiPercent', 0)}% KPI va chi con {campaign.get('daysLeft', 0)} ngay."
+                                    f"Campaign {campaign.get('campaignName', '-')} mới đạt "
+                                    f"{campaign.get('kpiPercent', 0)}% KPI và chỉ còn {campaign.get('daysLeft', 0)} ngày."
                                 ),
                             }
                         )
@@ -182,7 +182,7 @@ def build_health_snapshot(
                                 "severity": "warning",
                                 "code": "clip_drop_anomaly",
                                 "message": (
-                                    f"So clip he KOL ngay gan nhat giam manh: {latest} clip so voi {previous} clip truoc do."
+                                    f"Số clip hệ KOL ngày gần nhất giảm mạnh: {latest} clip so với {previous} clip trước đó."
                                 ),
                             }
                         )
@@ -217,26 +217,26 @@ def build_health_snapshot(
 def format_health_report(snapshot: dict[str, Any]) -> str:
     store = snapshot["storeSummary"]
     lines = [
-        "**Tinh trang du lieu**",
-        f"*Kho du lieu: `{store['dbPath']}`*",
-        f"- Bai viet: {store['postCount']}",
-        f"- Kenh: {store['channelCount']}",
-        f"- Tong view: {compact_number(store['totalView'])}",
+        "**Tình trạng dữ liệu**",
+        f"*Kho dữ liệu: `{store['dbPath']}`*",
+        f"- Bài viết: {store['postCount']}",
+        f"- Kênh: {store['channelCount']}",
+        f"- Tổng view: {compact_number(store['totalView'])}",
     ]
     active_campaigns = snapshot.get("activeCampaigns") or []
     if active_campaigns:
         names = ", ".join(item["name"] for item in active_campaigns)
-        lines.append(f"- Campaign dang active: {names}")
+        lines.append(f"- Campaign đang active: {names}")
     else:
-        lines.append("- Campaign dang active: khong co")
+        lines.append("- Campaign đang active: không có")
     lines.append("")
-    lines.append("**Canh bao hien tai**")
+    lines.append("**Cảnh báo hiện tại**")
     issues = snapshot.get("issues") or []
     if not issues:
-        lines.append("- Khong co canh bao nghiem trong.")
+        lines.append("- Không có cảnh báo nghiêm trọng.")
     else:
         for issue in issues:
-            prefix = "Nghiem trong" if issue["severity"] == "critical" else "Luu y"
+            prefix = "Nghiêm trọng" if issue["severity"] == "critical" else "Lưu ý"
             lines.append(f"- {prefix}: {issue['message']}")
     return "\n".join(lines)
 
@@ -245,16 +245,16 @@ def format_data_report(snapshot: dict[str, Any]) -> str:
     store = snapshot["storeSummary"]
     platform_counts = store.get("platformCounts", {})
     lines = [
-        "**Du lieu dang dung**",
+        "**Dữ liệu đang dùng**",
         f"*SQLite: `{store['dbPath']}`*",
-        f"- Bai viet: {store['postCount']}",
-        f"- Kenh: {store['channelCount']}",
-        f"- Tong view: {compact_number(store['totalView'])}",
+        f"- Bài viết: {store['postCount']}",
+        f"- Kênh: {store['channelCount']}",
+        f"- Tổng view: {compact_number(store['totalView'])}",
     ]
     if platform_counts:
-        lines.append("- Phan bo theo nen tang:")
+        lines.append("- Phân bố theo nền tảng:")
         for platform, count in platform_counts.items():
-            lines.append(f"  - {platform}: {count} bai")
+            lines.append(f"  - {platform}: {count} bài")
     return "\n".join(lines)
 
 
@@ -264,7 +264,7 @@ def format_scope_report(snapshot: dict[str, Any]) -> str:
     platform_labels = ", ".join(scope["platformLabels"]) or "-"
     return "\n".join(
         [
-            "**Source scope hien tai**",
+            "**Source scope hiện tại**",
             f"- Category IDs: {', '.join(str(item) for item in scope['categoryIds']) or '-'}",
             f"- Category labels: {category_labels}",
             f"- Platform IDs: {', '.join(str(item) for item in scope['platformIds']) or '-'}",
@@ -275,9 +275,9 @@ def format_scope_report(snapshot: dict[str, Any]) -> str:
 
 def format_campaign_status_report(snapshot: dict[str, Any]) -> str:
     active_campaigns = snapshot.get("activeCampaigns") or []
-    lines = ["**Campaign dang active**"]
+    lines = ["**Campaign đang active**"]
     if not active_campaigns:
-        lines.append("- Khong co campaign nao trong giai doan active.")
+        lines.append("- Không có campaign nào trong giai đoạn active.")
         return "\n".join(lines)
     for item in active_campaigns:
         lines.append(
@@ -292,41 +292,41 @@ def format_health_alert(snapshot: dict[str, Any]) -> str:
     warning_issues = [item for item in (snapshot.get("issues") or []) if item.get("severity") == "warning"]
     active_campaigns = snapshot.get("activeCampaigns") or []
     lines = [
-        "**Canh bao du lieu FFVN**",
-        "*Bot tam dung gui bao cao vao group vi phat hien van de trong bo du lieu hien tai.*",
+        "**Cảnh báo dữ liệu FFVN**",
+        "*Bot tạm dừng gửi báo cáo vào group vì phát hiện vấn đề trong bộ dữ liệu hiện tại.*",
         "",
-        f"- Cap nhat lan cuoi: `{store.get('lastInsertedAt') or snapshot.get('generatedAt', '-')}`",
-        f"- Du lieu dang bao phu: `{store.get('minPublishedDate') or '-'} -> {store.get('maxPublishedDate') or '-'}`",
-        f"- Tong bai viet: {store.get('postCount', 0)} | Tong kenh: {store.get('channelCount', 0)}",
+        f"- Cập nhật lần cuối: `{store.get('lastInsertedAt') or snapshot.get('generatedAt', '-')}`",
+        f"- Dữ liệu đang bao phủ: `{store.get('minPublishedDate') or '-'} -> {store.get('maxPublishedDate') or '-'}`",
+        f"- Tổng bài viết: {store.get('postCount', 0)} | Tổng kênh: {store.get('channelCount', 0)}",
     ]
     if active_campaigns:
-        lines.append("- Campaign dang active: " + ", ".join(item.get("name", "-") for item in active_campaigns))
+        lines.append("- Campaign đang active: " + ", ".join(item.get("name", "-") for item in active_campaigns))
     lines.extend(
         [
             "",
-            "**Nghiem trong**",
+            "**Nghiêm trọng**",
         ]
     )
     if critical_issues:
         for issue in critical_issues:
             lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
     else:
-        lines.append("- Khong co loi nghiem trong.")
+        lines.append("- Không có lỗi nghiêm trọng.")
     lines.extend(
         [
             "",
-            "**Canh bao / Theo doi them**",
+            "**Cảnh báo / Theo dõi thêm**",
         ]
     )
     if warning_issues:
         for issue in warning_issues:
             lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
     else:
-        lines.append("- Khong co canh bao can theo doi them.")
+        lines.append("- Không có cảnh báo cần theo dõi thêm.")
     lines.extend(
         [
             "",
-            "*Neu can mo quyen bot hoac kiem tra lai nguon du lieu, vui long lien he ducthao.tran@garena.vn.*",
+            "*Nếu cần mở quyền bot hoặc kiểm tra lại nguồn dữ liệu, vui lòng liên hệ ducthao.tran@garena.vn.*",
         ]
     )
     return "\n".join(lines).strip()

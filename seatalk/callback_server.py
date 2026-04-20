@@ -59,10 +59,10 @@ def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dic
 
 def _format_private_access_denied(callback_context: dict[str, str], *, contact_email: str) -> str:
     return (
-        "**Bot chi nhan lenh private tu admin da duoc cap quyen.**\n"
-        f"*Vui long lien he {contact_email} de duoc them quyen.*\n"
+        "**Bot chỉ nhận lệnh private từ admin đã được cấp quyền.**\n"
+        f"*Vui lòng liên hệ {contact_email} để được thêm quyền.*\n"
         "\n"
-        "*Thong tin dinh danh hien tai cua ban:*\n"
+        "*Thông tin định danh hiện tại của bạn:*\n"
         f"- employee_code: `{callback_context.get('employee_code') or '-'}`\n"
         f"- email: `{callback_context.get('email') or '-'}`\n"
         f"- seatalk_id: `{callback_context.get('seatalk_id') or '-'}`"
@@ -448,35 +448,39 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = format_health_report(health_snapshot)
             elif command == "webcompany":
                 links_payload = load_json(Path("config/webcompany_links.json"))
-                lines = ["**Link web quan trong cua team**"]
-                links = links_payload.get("links") or []
-                if not links:
-                    lines.append("- Chua cau hinh link nao.")
+                lines = ["**Link web quan trọng của team**"]
+                sections = links_payload.get("sections") or []
+                if not sections and links_payload.get("links"):
+                    sections = [{"title": "Link tổng hợp", "links": links_payload.get("links") or []}]
+                if not sections:
+                    lines.append("- Chưa cấu hình link nào.")
                 else:
-                    for item in links:
-                        lines.append(f"- {item.get('label', 'Link')}: {item.get('url', '-')}")
-                        if item.get("note"):
-                            lines.append(f"  *{item['note']}*")
+                    for section in sections:
+                        lines.append(f"\n**{section.get('title', 'Danh sách link')}**")
+                        for item in section.get("links") or []:
+                            lines.append(f"- {item.get('label', 'Link')}: {item.get('url', '-')}")
+                            if item.get("note"):
+                                lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
             elif command == "help":
                 reply_text = (
-                    "**Lenh bot private**\n"
-                    "*Nhap mot trong cac lenh sau de xem du lieu nhanh:*\n"
-                    "- `health`: tong quan tinh trang du lieu\n"
-                    "- `data`: kho du lieu dang dung\n"
-                    "- `scope`: source scope hien tai\n"
-                    "- `campaign`: bao cao campaign hien tai\n"
-                    "- `official`: bao cao kenh Official\n"
-                    "- `refresh`: dong bo artifact moi nhat roi tra lai thong tin du lieu\n"
-                    "- `webcompany`: liet ke cac link web quan trong cua team\n"
-                    "- `help`: hien menu nay\n"
+                    "**Lệnh bot private**\n"
+                    "*Nhập một trong các lệnh sau để xem dữ liệu nhanh:*\n"
+                    "- `health`: tổng quan tình trạng dữ liệu\n"
+                    "- `data`: kho dữ liệu đang dùng\n"
+                    "- `scope`: source scope hiện tại\n"
+                    "- `campaign`: báo cáo campaign hiện tại\n"
+                    "- `official`: báo cáo kênh Official\n"
+                    "- `refresh`: đồng bộ artifact mới nhất rồi trả lại thông tin dữ liệu\n"
+                    "- `webcompany`: liệt kê các link web quan trọng của team\n"
+                    "- `help`: hiện menu này\n"
                     "\n"
-                    "*Ban cung co the hoi truc tiep du lieu, vi du:*\n"
-                    "- `Jeeker thang nay da dang bao nhieu clip`\n"
-                    "- `Jeeker thang nay tong view bao nhieu`\n"
-                    "- `Top clip cua Jeeker trong thang nay`\n"
-                    "- `So sanh Jeeker va Bac Gau trong thang nay`\n"
-                    "- `Bac Gau thang nay co bao nhieu clip trieu view`"
+                    "*Bạn cũng có thể hỏi trực tiếp dữ liệu, ví dụ:*\n"
+                    "- `Jeeker tháng này đã đăng bao nhiêu clip`\n"
+                    "- `Jeeker tháng này tổng view bao nhiêu`\n"
+                    "- `Top clip của Jeeker trong tháng này`\n"
+                    "- `So sánh Jeeker và Bác Gấu trong tháng này`\n"
+                    "- `Bác Gấu tháng này có bao nhiêu clip triệu view`"
                 )
             else:
                 reply_text = answer_data_question(
@@ -484,9 +488,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     message_text,
                     now=datetime.now(),
                 ) or (
-                    "**Toi chua hieu cau hoi nay**\n"
-                    "*Thu lai bang mot lenh nhu `health`, `campaign`, `official` "
-                    "hoac mot cau hoi du lieu cu the.*"
+                    "**Tôi chưa hiểu câu hỏi này**\n"
+                    "*Thử lại bằng một lệnh như `health`, `campaign`, `official` "
+                    "hoặc một câu hỏi dữ liệu cụ thể.*"
                 )
 
             private_client.send_text(reply_text)

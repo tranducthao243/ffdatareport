@@ -1,14 +1,67 @@
 {
-  "links": [
+  "sections": [
     {
-      "label": "Cong ty",
-      "url": "https://example.com/company",
-      "note": "Cap nhat link cong ty tai day."
+      "title": "Web Team Free Fire",
+      "links": [
+        {
+          "label": "CreativeLab",
+          "url": "https://creativelab.garena.vn"
+        },
+        {
+          "label": "Request Mission",
+          "url": "https://creativelab.garena.vn",
+          "note": "Tạo link shortlink."
+        },
+        {
+          "label": "PowerBI",
+          "url": "https://app.powerbi.com"
+        },
+        {
+          "label": "Nhà Sáng Tạo",
+          "url": "https://nhasangtao.ff.garena.vn"
+        },
+        {
+          "label": "Website FF",
+          "url": "https://ff.garena.com"
+        }
+      ]
     },
     {
-      "label": "Dashboard",
-      "url": "https://example.com/dashboard",
-      "note": "Cap nhat dashboard team tai day."
+      "title": "Web Công Ty",
+      "links": [
+        {
+          "label": "Vendors",
+          "url": "https://vendors.garena.vn"
+        },
+        {
+          "label": "Purchase",
+          "url": "https://purchase.ved.com.vn"
+        },
+        {
+          "label": "Gigi",
+          "url": "https://gigi.garena.vn"
+        },
+        {
+          "label": "Booking",
+          "url": "https://booking.garena"
+        },
+        {
+          "label": "People",
+          "url": "https://people.sea.com"
+        },
+        {
+          "label": "IT Center",
+          "url": "https://itcenter.sea.com"
+        },
+        {
+          "label": "Đặt Cơm",
+          "url": "https://datcom.garena.vn"
+        },
+        {
+          "label": "Social Data",
+          "url": "https://socialdata.garena.vn"
+        }
+      ]
     }
   ]
 }

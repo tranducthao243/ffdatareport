@@ -6,17 +6,17 @@ from typing import Any
 def render_seatalk_package(package: dict[str, Any]) -> str:
     lines = [
         f"**{str(package['title']).strip()}**",
-        f"*Ban tom tat du lieu tu dong tu Data Master | Goi du lieu: `{package['reportCode']}`*",
+        f"*Bản tóm tắt dữ liệu tự động từ Data Master | Gói dữ liệu: `{package['reportCode']}`*",
         "",
     ]
     for section in package.get("sections", []):
         code = str(section.get("code") or "").strip()
         if code == "TOPA":
-            lines.extend(render_top_by_platform("Video noi bat trong 24 gio qua", section))
+            lines.extend(render_top_by_platform("Video nổi bật trong 24 giờ qua", section))
         elif code == "TOPB":
-            lines.extend(render_top_by_platform("Video noi bat trong 7 ngay qua", section))
+            lines.extend(render_top_by_platform("Video nổi bật trong 7 ngày qua", section))
         elif code == "TOPC":
-            lines.extend(render_top_channels("5 kenh KOL noi bat trong 7 ngay qua", section))
+            lines.extend(render_top_channels("5 kênh KOL nổi bật trong 7 ngày qua", section))
         elif code == "TOPE":
             lines.extend(render_tope(section))
         elif code == "TOPD":
@@ -30,7 +30,7 @@ def render_seatalk_package(package: dict[str, Any]) -> str:
 def render_top_by_platform(title: str, section: dict[str, Any]) -> list[str]:
     lines = [
         f"**{title}**",
-        f"*Khung thoi gian: `{section['window']['from']} -> {section['window']['to']}`*",
+        f"*Khung thời gian: `{section['window']['from']} -> {section['window']['to']}`*",
         "",
         "*TikTok*",
     ]
@@ -42,57 +42,57 @@ def render_top_by_platform(title: str, section: dict[str, Any]) -> list[str]:
 
 
 def render_top_channels(title: str, section: dict[str, Any]) -> list[str]:
-    lines = [f"**{title}**", f"*Khung thoi gian: `{section['window']['from']} -> {section['window']['to']}`*"]
+    lines = [f"**{title}**", f"*Khung thời gian: `{section['window']['from']} -> {section['window']['to']}`*"]
     for index, item in enumerate(section.get("channels", []), start=1):
         lines.append(
             f"{index}. {item['channelName']} | {compact_number(item['totalView'])} view | {item['totalClips']} clip"
         )
     if len(lines) == 2:
-        lines.append("- Chua co du lieu.")
+        lines.append("- Chưa có dữ liệu.")
     return lines
 
 
 def render_tope(section: dict[str, Any]) -> list[str]:
     lines = [
-        "**Tong quan hieu qua he KOL trong 7 ngay qua**",
-        f"*Khung thoi gian: `{section['window']['from']} -> {section['window']['to']}`*",
-        f"- Tong view: {compact_number(section['totalViews'])}",
-        f"- Tong clip: {section['totalClips']}",
+        "**Tổng quan hiệu quả hệ KOL trong 7 ngày qua**",
+        f"*Khung thời gian: `{section['window']['from']} -> {section['window']['to']}`*",
+        f"- Tổng view: {compact_number(section['totalViews'])}",
+        f"- Tổng clip: {section['totalClips']}",
     ]
     lines.extend(render_history_compare(section.get("historyCompare")))
     return lines
 
 
 def render_topd(section: dict[str, Any]) -> list[str]:
-    lines = ["**Tien do campaign**"]
+    lines = ["**Tiến độ campaign**"]
     campaigns = section.get("campaigns", [])
     if not campaigns:
-        return lines + ["- Chua co campaign nao duoc gan cho nhom nay."]
+        return lines + ["- Chưa có campaign nào được gắn cho nhóm này."]
     for campaign in campaigns:
         average_view_per_clip = campaign.get("averageViewPerClip", 0)
         lines.extend(
             [
                 f"- **{campaign['campaignName']}** | {', '.join('#' + tag for tag in campaign['hashtags'])}",
-                f"  Tong view: {compact_number(campaign['totalViews'])}",
-                f"  Tong clip: {campaign['totalClips']}",
-                f"  Trung binh view 1 clip: {compact_number(int(average_view_per_clip))}",
-                f"  Muc tieu KPI: {campaign['kpiPercent']}% / {compact_number(campaign['kpiTarget'])}",
-                f"  Kha nang dat KPI: {campaign.get('forecastKpiText', '-')}",
-                f"  So ngay con lai: {campaign['daysLeft']}",
-                "  *Video TikTok noi bat trong 3 ngay gan day:*",
+                f"  Tổng view: {compact_number(campaign['totalViews'])}",
+                f"  Tổng clip: {campaign['totalClips']}",
+                f"  Trung bình view 1 clip: {compact_number(int(average_view_per_clip))}",
+                f"  Mục tiêu KPI: {campaign['kpiPercent']}% / {compact_number(campaign['kpiTarget'])}",
+                f"  Khả năng đạt KPI: {campaign.get('forecastKpiText', '-')}",
+                f"  Số ngày còn lại: {campaign['daysLeft']}",
+                "  *Video TikTok nổi bật trong 3 ngày gần đây:*",
             ]
         )
         lines.extend([f"  {line}" for line in render_history_compare(campaign.get("historyCompare"))])
         if campaign.get("coverageWarning"):
-            lines.append(f"  *Luu y: {campaign['coverageWarning']}*")
+            lines.append(f"  *Lưu ý: {campaign['coverageWarning']}*")
         if campaign.get("topRecentTikTok"):
             for index, item in enumerate(campaign["topRecentTikTok"], start=1):
                 lines.append(f"  {index}. {item['channelName']} | {compact_number(item['view'])} view")
                 lines.append(f"     {item['url']}")
         else:
-            lines.append("  - Chua co du lieu.")
+            lines.append("  - Chưa có dữ liệu.")
         lines.append(
-            "  *KOL noi bat 7 ngay qua chua tham gia campaign:* "
+            "  *KOL nổi bật 7 ngày qua chưa tham gia campaign:* "
             f"`{campaign.get('topKolsWithoutCampaignWindow', {}).get('from', '-')}"
             f" -> {campaign.get('topKolsWithoutCampaignWindow', {}).get('to', '-')}`"
         )
@@ -103,27 +103,27 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                     f"  {index}. {item['channelName']} | {compact_number(item['totalViews'])} view | {item['totalClips']} clip"
                 )
         else:
-            lines.append("  - Khong co KOL noi bat nao dang nam ngoai campaign.")
+            lines.append("  - Không có KOL nổi bật nào đang nằm ngoài campaign.")
     return lines
 
 
 def render_topf(section: dict[str, Any]) -> list[str]:
     lines = [
-        "**Diem nhanh kenh Official**",
-        f"*Top 5 view 3 ngay: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*",
+        "**Điểm nhanh kênh Official**",
+        f"*Top 5 view 3 ngày: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*",
     ]
     lines.extend(render_ranked_posts(section.get("topVideos", [])))
     lines.append("")
-    lines.append(f"*Top 3 bai viet tuong tac 3 ngay: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*")
+    lines.append(f"*Top 3 bài viết tương tác 3 ngày: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*")
     top_photo_posts = section.get("topPhotoEngagement", [])
     if top_photo_posts:
         for index, item in enumerate(top_photo_posts, start=1):
             lines.append(f"{index}. {item['channelName']} | {compact_number(item['reaction'])} reaction")
             lines.append(f"   {item['url']}")
     else:
-        lines.append("- Chua co du lieu.")
+        lines.append("- Chưa có dữ liệu.")
     lines.append("")
-    lines.append(f"*Tong hop 7 ngay: `{section['summaryWindow']['from']} -> {section['summaryWindow']['to']}`*")
+    lines.append(f"*Tổng hợp 7 ngày: `{section['summaryWindow']['from']} -> {section['summaryWindow']['to']}`*")
     for platform, totals in section.get("platformTotals", {}).items():
         lines.append(
             f"- {platform.title()}: {compact_number(totals['totalViews'])} view | {totals['totalClips']} clip"
@@ -134,7 +134,7 @@ def render_topf(section: dict[str, Any]) -> list[str]:
 
 def render_ranked_posts(items: list[dict[str, Any]]) -> list[str]:
     if not items:
-        return ["- Chua co du lieu."]
+        return ["- Chưa có dữ liệu."]
     lines: list[str] = []
     for index, item in enumerate(items, start=1):
         lines.append(f"{index}. {item['channelName']} | {compact_number(item['view'])} view")
@@ -153,10 +153,10 @@ def compact_number(value: int) -> str:
 
 def format_delta(change: int) -> str:
     if change > 0:
-        return f"Tang {compact_number(change)}"
+        return f"Tăng {compact_number(change)}"
     if change < 0:
-        return f"Giam {compact_number(abs(change))}"
-    return "Khong doi"
+        return f"Giảm {compact_number(abs(change))}"
+    return "Không đổi"
 
 
 def render_history_compare(history_compare: dict[str, Any] | None) -> list[str]:
@@ -165,8 +165,8 @@ def render_history_compare(history_compare: dict[str, Any] | None) -> list[str]:
     lines: list[str] = []
     if "vsPreviousDay" in history_compare:
         current = history_compare["vsPreviousDay"]
-        lines.append(f"- So voi hom qua: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+        lines.append(f"- So với hôm qua: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
     if "vsPreviousWeek" in history_compare:
         current = history_compare["vsPreviousWeek"]
-        lines.append(f"- So voi tuan truoc: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+        lines.append(f"- So với tuần trước: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
     return lines

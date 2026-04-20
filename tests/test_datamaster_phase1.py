@@ -475,9 +475,9 @@ class DataMasterPhase1Tests(unittest.TestCase):
             issue_codes = {item["code"] for item in payload["dataHealth"]["issues"]}
             self.assertIn("official_missing_data", issue_codes)
             alert_text = format_health_alert(payload["dataHealth"])
-            self.assertIn("**Canh bao du lieu FFVN**", alert_text)
-            self.assertIn("**Nghiem trong**", alert_text)
-            self.assertIn("Official mat data", alert_text)
+            self.assertIn("**Cảnh báo dữ liệu FFVN**", alert_text)
+            self.assertIn("**Nghiêm trọng**", alert_text)
+            self.assertIn("Official mất data", alert_text)
 
 
 if __name__ == "__main__":
