@@ -165,6 +165,47 @@ class DataMasterPhase1Tests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
+            history_dir = root / "history"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            (history_dir / "previous_day.json").write_text(
+                json.dumps(
+                    {
+                        "snapshotDate": "2026-04-17",
+                        "reports": {
+                            "SO1": {
+                                "sections": {
+                                    "TOPE": {"totalViews": 700000, "totalClips": 2},
+                                }
+                            },
+                            "TOPD_REPORT": {
+                                "sections": {
+                                    "TOPD": {
+                                        "campaigns": [
+                                            {
+                                                "campaignName": "OB53",
+                                                "totalViews": 200000,
+                                                "totalClips": 1,
+                                            }
+                                        ]
+                                    }
+                                }
+                            },
+                            "TOPF_REPORT": {
+                                "sections": {
+                                    "TOPF": {
+                                        "platformTotals": {
+                                            "facebook": {"totalViews": 50000, "totalClips": 1},
+                                            "tiktok": {"totalViews": 0, "totalClips": 0},
+                                            "youtube": {"totalViews": 0, "totalClips": 0},
+                                        }
+                                    }
+                                }
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
 
             payload = build_configured_reports(
                 db_path,
@@ -176,6 +217,7 @@ class DataMasterPhase1Tests(unittest.TestCase):
                 source_scope={"category_ids": [13, 14, 22], "platform_ids": [0, 1, 2]},
                 now=datetime(2026, 4, 18, 9, 0, 0),
                 send=False,
+                history_dir=history_dir,
             )
 
             self.assertEqual(payload["packageCount"], 3)
@@ -190,6 +232,7 @@ class DataMasterPhase1Tests(unittest.TestCase):
             tope = next(item for item in main_package["sections"] if item["code"] == "TOPE")
             self.assertEqual(tope["totalViews"], 1000000)
             self.assertEqual(tope["totalClips"], 3)
+            self.assertIn("historyCompare", tope)
             self.assertNotIn("Interactive actions", main_package["renderedText"])
 
             campaign_package = next(item for item in payload["packages"] if item["groupName"] == "campaign")
@@ -197,11 +240,13 @@ class DataMasterPhase1Tests(unittest.TestCase):
             topd = next(item for item in campaign_package["sections"] if item["code"] == "TOPD")
             self.assertEqual(topd["campaigns"][0]["totalViews"], 300000)
             self.assertEqual(topd["campaigns"][0]["totalClips"], 1)
+            self.assertIn("historyCompare", topd["campaigns"][0])
 
             official_package = next(item for item in payload["packages"] if item["groupName"] == "official")
             self.assertEqual(official_package["interactiveActions"], [])
             topf = next(item for item in official_package["sections"] if item["code"] == "TOPF")
             self.assertEqual(topf["platformTotals"]["facebook"]["totalViews"], 80000)
+            self.assertIn("historyCompare", topf)
 
     def test_invalid_config_fails_with_clear_message(self):
         rows = [

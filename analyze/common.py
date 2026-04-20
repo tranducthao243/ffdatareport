@@ -23,6 +23,7 @@ class StorePost:
     channel_name: str
     category_id: int | None
     category_name: str
+    post_type: str
     title: str
     description: str
     url: str
@@ -60,7 +61,7 @@ def load_posts(db_path: Path) -> list[StorePost]:
             """
             SELECT
               post_id, platform, channel_id, channel_name, category_id, category_name,
-              title, description, url, published_at, published_date,
+              post_type, title, description, url, published_at, published_date,
               view, engagement, reaction, comment, duration_seconds,
               is_kol, is_official
             FROM posts
@@ -85,6 +86,7 @@ def load_posts(db_path: Path) -> list[StorePost]:
                 channel_name=row["channel_name"],
                 category_id=row["category_id"],
                 category_name=row["category_name"],
+                post_type=row["post_type"],
                 title=row["title"],
                 description=row["description"],
                 url=row["url"],
@@ -215,3 +217,9 @@ def percentage(value: int, target: int) -> float:
     if target <= 0:
         return 0.0
     return round((value / target) * 100, 2)
+
+
+def average(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)

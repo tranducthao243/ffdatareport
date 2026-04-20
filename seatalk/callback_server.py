@@ -446,6 +446,18 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = format_scope_report(health_snapshot)
             elif command == "health":
                 reply_text = format_health_report(health_snapshot)
+            elif command == "webcompany":
+                links_payload = load_json(Path("config/webcompany_links.json"))
+                lines = ["**Link web quan trong cua team**"]
+                links = links_payload.get("links") or []
+                if not links:
+                    lines.append("- Chua cau hinh link nao.")
+                else:
+                    for item in links:
+                        lines.append(f"- {item.get('label', 'Link')}: {item.get('url', '-')}")
+                        if item.get("note"):
+                            lines.append(f"  *{item['note']}*")
+                reply_text = "\n".join(lines)
             elif command == "help":
                 reply_text = (
                     "**Lenh bot private**\n"
@@ -456,6 +468,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `campaign`: bao cao campaign hien tai\n"
                     "- `official`: bao cao kenh Official\n"
                     "- `refresh`: dong bo artifact moi nhat roi tra lai thong tin du lieu\n"
+                    "- `webcompany`: liet ke cac link web quan trong cua team\n"
                     "- `help`: hien menu nay\n"
                     "\n"
                     "*Ban cung co the hoi truc tiep du lieu, vi du:*\n"

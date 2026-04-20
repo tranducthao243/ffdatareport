@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import OFFICIAL_PLATFORMS, build_anchor_window, build_days_window, filter_posts, load_posts, rank_posts
+from .common import OFFICIAL_PLATFORMS, build_anchor_window, build_days_window, filter_posts, load_posts, rank_posts, serialize_post
+
+
+VIDEO_LIKE_TYPES = {"video", "reel", "live"}
+PHOTO_ENGAGEMENT_TYPES = {"photo", "album"}
 
 
 def analyze_topf(
@@ -24,6 +28,19 @@ def analyze_topf(
         platforms=OFFICIAL_PLATFORMS,
         require_official=True,
     )
+    top_video_posts = [
+        post for post in top_posts
+        if str(getattr(post, "post_type", "") or "").strip().lower() in VIDEO_LIKE_TYPES
+    ]
+    top_photo_posts = [
+        post for post in top_posts
+        if str(getattr(post, "post_type", "") or "").strip().lower() in PHOTO_ENGAGEMENT_TYPES
+    ]
+    top_photo_ranked = sorted(
+        top_photo_posts,
+        key=lambda post: (post.reaction, post.engagement, post.published_at),
+        reverse=True,
+    )[:3]
     weekly_posts = filter_posts(
         posts,
         start_date=seven_start,
@@ -31,9 +48,13 @@ def analyze_topf(
         platforms=OFFICIAL_PLATFORMS,
         require_official=True,
     )
+    weekly_video_posts = [
+        post for post in weekly_posts
+        if str(getattr(post, "post_type", "") or "").strip().lower() in VIDEO_LIKE_TYPES
+    ]
     totals_by_platform: dict[str, dict[str, int]] = {}
     for platform in OFFICIAL_PLATFORMS:
-        scoped = [post for post in weekly_posts if post.platform == platform]
+        scoped = [post for post in weekly_video_posts if post.platform == platform]
         totals_by_platform[platform] = {
             "totalViews": sum(post.view for post in scoped),
             "totalClips": len(scoped),
@@ -43,6 +64,7 @@ def analyze_topf(
         "title": "TOPF",
         "topWindow": {"from": top_start.isoformat(), "to": top_end.isoformat()},
         "summaryWindow": {"from": seven_start.isoformat(), "to": seven_end.isoformat()},
-        "topVideos": rank_posts(top_posts, limit=limit),
+        "topVideos": rank_posts(top_video_posts, limit=limit),
+        "topPhotoEngagement": [serialize_post(post) for post in top_photo_ranked],
         "platformTotals": totals_by_platform,
     }

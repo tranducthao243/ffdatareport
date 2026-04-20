@@ -53,12 +53,14 @@ def render_top_channels(title: str, section: dict[str, Any]) -> list[str]:
 
 
 def render_tope(section: dict[str, Any]) -> list[str]:
-    return [
+    lines = [
         "**Tong quan hieu qua he KOL trong 7 ngay qua**",
         f"*Khung thoi gian: `{section['window']['from']} -> {section['window']['to']}`*",
         f"- Tong view: {compact_number(section['totalViews'])}",
         f"- Tong clip: {section['totalClips']}",
     ]
+    lines.extend(render_history_compare(section.get("historyCompare")))
+    return lines
 
 
 def render_topd(section: dict[str, Any]) -> list[str]:
@@ -67,16 +69,22 @@ def render_topd(section: dict[str, Any]) -> list[str]:
     if not campaigns:
         return lines + ["- Chua co campaign nao duoc gan cho nhom nay."]
     for campaign in campaigns:
+        average_view_per_clip = campaign.get("averageViewPerClip", 0)
         lines.extend(
             [
                 f"- **{campaign['campaignName']}** | {', '.join('#' + tag for tag in campaign['hashtags'])}",
                 f"  Tong view: {compact_number(campaign['totalViews'])}",
                 f"  Tong clip: {campaign['totalClips']}",
+                f"  Trung binh view 1 clip: {compact_number(int(average_view_per_clip))}",
                 f"  Muc tieu KPI: {campaign['kpiPercent']}% / {compact_number(campaign['kpiTarget'])}",
+                f"  Kha nang dat KPI: {campaign.get('forecastKpiText', '-')}",
                 f"  So ngay con lai: {campaign['daysLeft']}",
-                "  *Video TikTok noi bat trong 2 ngay gan day:*",
+                "  *Video TikTok noi bat trong 3 ngay gan day:*",
             ]
         )
+        lines.extend([f"  {line}" for line in render_history_compare(campaign.get("historyCompare"))])
+        if campaign.get("coverageWarning"):
+            lines.append(f"  *Luu y: {campaign['coverageWarning']}*")
         if campaign.get("topRecentTikTok"):
             for index, item in enumerate(campaign["topRecentTikTok"], start=1):
                 lines.append(f"  {index}. {item['channelName']} | {compact_number(item['view'])} view")
@@ -89,15 +97,25 @@ def render_topd(section: dict[str, Any]) -> list[str]:
 def render_topf(section: dict[str, Any]) -> list[str]:
     lines = [
         "**Diem nhanh kenh Official**",
-        f"*Top view 3 ngay: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*",
+        f"*Top 5 view 3 ngay: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*",
     ]
     lines.extend(render_ranked_posts(section.get("topVideos", [])))
+    lines.append("")
+    lines.append(f"*Top 3 bai viet tuong tac 3 ngay: `{section['topWindow']['from']} -> {section['topWindow']['to']}`*")
+    top_photo_posts = section.get("topPhotoEngagement", [])
+    if top_photo_posts:
+        for index, item in enumerate(top_photo_posts, start=1):
+            lines.append(f"{index}. {item['channelName']} | {compact_number(item['reaction'])} reaction")
+            lines.append(f"   {item['url']}")
+    else:
+        lines.append("- Chua co du lieu.")
     lines.append("")
     lines.append(f"*Tong hop 7 ngay: `{section['summaryWindow']['from']} -> {section['summaryWindow']['to']}`*")
     for platform, totals in section.get("platformTotals", {}).items():
         lines.append(
             f"- {platform.title()}: {compact_number(totals['totalViews'])} view | {totals['totalClips']} clip"
         )
+    lines.extend(render_history_compare(section.get("historyCompare")))
     return lines
 
 
@@ -118,3 +136,24 @@ def compact_number(value: int) -> str:
     if absolute >= 1_000:
         return f"{value / 1_000:.1f}K"
     return str(value)
+
+
+def format_delta(change: int) -> str:
+    if change > 0:
+        return f"Tang {compact_number(change)}"
+    if change < 0:
+        return f"Giam {compact_number(abs(change))}"
+    return "Khong doi"
+
+
+def render_history_compare(history_compare: dict[str, Any] | None) -> list[str]:
+    if not history_compare:
+        return []
+    lines: list[str] = []
+    if "vsPreviousDay" in history_compare:
+        current = history_compare["vsPreviousDay"]
+        lines.append(f"- So voi hom qua: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+    if "vsPreviousWeek" in history_compare:
+        current = history_compare["vsPreviousWeek"]
+        lines.append(f"- So voi tuan truoc: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+    return lines

@@ -56,6 +56,8 @@ def classify_private_command(text: str) -> str:
         return "official"
     if normalized in {"refresh", "sync", "lam moi", "dong bo"}:
         return "refresh"
+    if normalized in {"webcompany", "web", "link", "links"}:
+        return "webcompany"
     return "unknown"
 
 

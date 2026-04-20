@@ -170,6 +170,61 @@ jobs:
             --save-store outputs/ffvn_master.sqlite \
             --report-timezone Asia/Ho_Chi_Minh
 
+      - name: Download recent send snapshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p outputs/history_snapshots
+
+          gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPO}/actions/artifacts?per_page=100" > send_artifacts.json
+
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import zipfile
+          from pathlib import Path
+
+          repo = os.environ["REPO"]
+          artifact_name = "ffvn-daily-send-latest"
+          artifacts = json.loads(Path("send_artifacts.json").read_text(encoding="utf-8")).get("artifacts", [])
+          output_dir = Path("outputs/history_snapshots")
+          extracted = 0
+
+          for artifact in sorted(artifacts, key=lambda item: item.get("created_at", ""), reverse=True):
+              if artifact.get("name") != artifact_name or artifact.get("expired"):
+                  continue
+              artifact_id = artifact["id"]
+              zip_path = Path(f"send_artifact_{artifact_id}.zip")
+              with zip_path.open("wb") as handle:
+                  result = subprocess.run(
+                      [
+                          "gh",
+                          "api",
+                          "-H",
+                          "Accept: application/vnd.github+json",
+                          f"/repos/{repo}/actions/artifacts/{artifact_id}/zip",
+                      ],
+                      stdout=handle,
+                      stderr=subprocess.PIPE,
+                      text=False,
+                  )
+              if result.returncode != 0:
+                  continue
+              with zipfile.ZipFile(zip_path, "r") as archive:
+                  candidate = next((name for name in archive.namelist() if name.endswith("ffvn_daily_snapshot.json")), "")
+                  if not candidate:
+                      continue
+                  target = output_dir / f"{artifact_id}.json"
+                  target.write_bytes(archive.read(candidate))
+                  extracted += 1
+                  if extracted >= 8:
+                      break
+          print(f"downloaded_snapshots={extracted}")
+          PY
+
       - name: Build configured reports
         run: |
           extra_args=""
@@ -183,6 +238,7 @@ jobs:
             --load-store outputs/ffvn_master.sqlite \
             --save-report outputs/ffvn_master_reports.json \
             --save-history outputs/ffvn_daily_snapshot.json \
+            --load-history-dir outputs/history_snapshots \
             --save-rendered-dir outputs/rendered_reports \
             ${extra_args}
 
@@ -244,5 +300,6 @@ jobs:
           path: |
             outputs/ffvn_master_reports.json
             outputs/ffvn_daily_snapshot.json
+            outputs/history_snapshots
             outputs/rendered_reports
           if-no-files-found: warn

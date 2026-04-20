@@ -78,7 +78,10 @@ def sqlite_store_summary(db_path: Path) -> dict[str, Any]:
             SELECT
               COUNT(*) AS post_count,
               COUNT(DISTINCT channel_id) AS channel_count,
-              COALESCE(SUM(view), 0) AS total_view
+              COALESCE(SUM(view), 0) AS total_view,
+              MIN(published_date) AS min_published_date,
+              MAX(published_date) AS max_published_date,
+              MAX(inserted_at) AS last_inserted_at
             FROM posts
             """
         ).fetchone()
@@ -95,6 +98,9 @@ def sqlite_store_summary(db_path: Path) -> dict[str, Any]:
         "postCount": int(counts["post_count"]),
         "channelCount": int(counts["channel_count"]),
         "totalView": int(counts["total_view"]),
+        "minPublishedDate": str(counts["min_published_date"] or ""),
+        "maxPublishedDate": str(counts["max_published_date"] or ""),
+        "lastInsertedAt": str(counts["last_inserted_at"] or ""),
         "platformCounts": {row["platform"]: int(row["post_count"]) for row in platform_rows},
     }
 

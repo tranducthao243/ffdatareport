@@ -15,7 +15,7 @@ from .config_loader import (
     resolve_group_target,
     validate_reporting_config,
 )
-from .history import build_daily_snapshot, save_daily_snapshot
+from .history import apply_history_deltas, build_daily_snapshot, save_daily_snapshot
 from .health import build_health_snapshot, format_health_alert
 
 
@@ -43,6 +43,7 @@ def build_configured_reports(
     seatalk_app_secret: str = "",
     seatalk_admin_employee_codes: list[str] | None = None,
     history_path: Path | None = None,
+    history_dir: Path | None = None,
 ) -> dict[str, Any]:
     groups_config = load_json(groups_path)
     reports_config = load_json(reports_path)
@@ -175,6 +176,7 @@ def build_configured_reports(
         "packages": packages,
         "sendResults": send_results,
     }
+    payload = apply_history_deltas(payload, history_dir=history_dir, now=now)
     if history_path:
         save_daily_snapshot(build_daily_snapshot(payload, now=now), history_path)
     return payload

@@ -1,0 +1,14 @@
+{
+  "links": [
+    {
+      "label": "Cong ty",
+      "url": "https://example.com/company",
+      "note": "Cap nhat link cong ty tai day."
+    },
+    {
+      "label": "Dashboard",
+      "url": "https://example.com/dashboard",
+      "note": "Cap nhat dashboard team tai day."
+    }
+  ]
+}
