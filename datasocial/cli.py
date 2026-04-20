@@ -139,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reports-config", type=Path, default=Path("config/reports.json"), help="Reports config JSON path.")
     parser.add_argument("--campaigns-config", type=Path, default=Path("config/campaigns.json"), help="Campaigns config JSON path.")
     parser.add_argument("--save-report", type=Path, help="Optional path to save report JSON.")
+    parser.add_argument("--save-history", type=Path, help="Optional path to save daily snapshot JSON.")
     parser.add_argument(
         "--save-rendered-dir",
         type=Path,
@@ -354,6 +355,7 @@ def main() -> int:
                 seatalk_app_id=settings.seatalk_app_id,
                 seatalk_app_secret=settings.seatalk_app_secret,
                 seatalk_admin_employee_codes=parse_admin_employee_codes(),
+                history_path=args.save_history,
             )
             if args.save_report:
                 args.save_report.parent.mkdir(parents=True, exist_ok=True)

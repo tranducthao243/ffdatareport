@@ -5,7 +5,8 @@ from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
 from seatalk.callbacks import build_callback_context, extract_click_value, extract_message_text, parse_click_payload
 from seatalk.callback_server import build_runtime
-from seatalk.payloads import build_interactive_payload, build_report_interactive_payload
+from seatalk.interactive import build_interactive_actions, build_interactive_groups
+from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
 
 
@@ -60,6 +61,25 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         elements = payload["interactive_message"]["elements"]
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
         self.assertEqual(elements[1]["description"]["text"], "Mo nhanh phan du lieu can xem them.")
+
+    def test_build_interactive_groups_splits_campaign_and_trend_cards(self):
+        package = {
+            "reportCode": "SO1",
+            "groupName": "main",
+            "generatedAt": "2026-04-20T10:00:00",
+        }
+        package["interactiveActions"] = build_interactive_actions(package)
+
+        groups = build_interactive_groups(package)
+
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0]["title"], "Mo rong bao cao")
+        self.assertEqual(len(groups[0]["actions"]), 2)
+        self.assertEqual(groups[1]["title"], "Kiem tra trend")
+        self.assertEqual(len(groups[1]["actions"]), 2)
+
+        payload = build_interactive_group_payload(groups[1])
+        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Kiem tra trend")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
@@ -210,7 +230,10 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
                 "renderedText": "Bao cao\nhello",
                 "title": "Bao cao",
                 "interactiveActions": [
-                    {"label": "Data Campaign", "callbackPayload": '{"action":"campaign"}'},
+                    {"label": "Data Campaign", "callbackPayload": '{"action":"campaign"}', "actionGroup": "campaign_official"},
+                    {"label": "Official Channel", "callbackPayload": '{"action":"official"}', "actionGroup": "campaign_official"},
+                    {"label": "Trend nhay", "callbackPayload": '{"action":"trend_dance"}', "actionGroup": "trend"},
+                    {"label": "Trend tinh huong", "callbackPayload": '{"action":"trend_situation"}', "actionGroup": "trend"},
                 ],
             }
         ]
@@ -218,7 +241,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         result = send_report_packages(packages, app_id="id", app_secret="secret")
 
         client.send_text.assert_called_once()
-        client.send_interactive.assert_called_once()
+        self.assertEqual(client.send_interactive.call_count, 2)
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")
 

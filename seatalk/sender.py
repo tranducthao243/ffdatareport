@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from .auth import build_seatalk_client
-from .payloads import build_report_interactive_payload, build_text_payload
+from .interactive import build_interactive_groups
+from .payloads import build_interactive_group_payload, build_text_payload
 
 
 def send_report_packages(
@@ -32,7 +33,8 @@ def send_report_packages(
             interactive_actions = package.get("interactiveActions") or []
             if interactive_actions:
                 try:
-                    client.send_interactive(build_report_interactive_payload(package))
+                    for interactive_group in build_interactive_groups(package):
+                        client.send_interactive(build_interactive_group_payload(interactive_group))
                     interactive_status = "sent"
                 except Exception as exc:
                     interactive_status = "failed"

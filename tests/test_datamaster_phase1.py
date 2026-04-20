@@ -184,7 +184,7 @@ class DataMasterPhase1Tests(unittest.TestCase):
             self.assertEqual(payload["summary"]["packagesBuilt"], 3)
             main_package = next(item for item in payload["packages"] if item["groupName"] == "main")
             self.assertEqual(main_package["reportCode"], "SO1")
-            self.assertEqual(len(main_package["interactiveActions"]), 2)
+            self.assertEqual(len(main_package["interactiveActions"]), 4)
             topa = next(item for item in main_package["sections"] if item["code"] == "TOPA")
             self.assertEqual(topa["tiktok"][0]["view"], 500000)
             tope = next(item for item in main_package["sections"] if item["code"] == "TOPE")

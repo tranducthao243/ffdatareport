@@ -17,6 +17,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             "label": "Xem campaign",
             "actionType": "open_report",
             "targetReportCode": "TOPD_REPORT",
+            "actionGroup": "campaign_official",
             "callbackPayload": encode_callback_payload(
                 {
                     "action": "open_report",
@@ -31,6 +32,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             "label": "Xem kenh Official",
             "actionType": "open_report",
             "targetReportCode": "TOPF_REPORT",
+            "actionGroup": "campaign_official",
             "callbackPayload": encode_callback_payload(
                 {
                     "action": "open_report",
@@ -41,7 +43,67 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
                 }
             ),
         },
+        {
+            "label": "Trend nhay",
+            "actionType": "reply_text",
+            "targetReportCode": "TREND_DANCE_REPORT",
+            "actionGroup": "trend",
+            "callbackPayload": encode_callback_payload(
+                {
+                    "action": "reply_text",
+                    "target_report_code": "TREND_DANCE_REPORT",
+                    "message": "Trend nhay dang duoc cap nhat. Toi se mo nut nay ngay khi category data san sang.",
+                    "source_report_code": report_code,
+                    "group_name": group_name,
+                    "generated_at": generated_at,
+                }
+            ),
+        },
+        {
+            "label": "Trend tinh huong",
+            "actionType": "reply_text",
+            "targetReportCode": "TREND_SITUATION_REPORT",
+            "actionGroup": "trend",
+            "callbackPayload": encode_callback_payload(
+                {
+                    "action": "reply_text",
+                    "target_report_code": "TREND_SITUATION_REPORT",
+                    "message": "Trend tinh huong dang duoc cap nhat. Toi se mo nut nay ngay khi category data san sang.",
+                    "source_report_code": report_code,
+                    "group_name": group_name,
+                    "generated_at": generated_at,
+                }
+            ),
+        },
     ]
+
+
+def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
+    actions = list(package.get("interactiveActions") or [])
+    if not actions:
+        return []
+
+    grouped: list[dict[str, Any]] = []
+    campaign_actions = [item for item in actions if item.get("actionGroup") == "campaign_official"]
+    trend_actions = [item for item in actions if item.get("actionGroup") == "trend"]
+
+    if campaign_actions:
+        grouped.append(
+            {
+                "title": "Mo rong bao cao",
+                "description": "Nhan nut de nhan them du lieu Campaign hoac kenh Official qua tin nhan private.",
+                "actions": campaign_actions,
+            }
+        )
+    if trend_actions:
+        grouped.append(
+            {
+                "title": "Kiem tra trend",
+                "description": "Nhan nut de theo doi trend nhay va trend tinh huong khi du lieu duoc cap nhat.",
+                "actions": trend_actions,
+            }
+        )
+    return grouped
 
 
 def encode_callback_payload(payload: dict[str, Any]) -> str:

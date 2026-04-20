@@ -41,6 +41,34 @@ from .callbacks import (
 LOGGER = logging.getLogger("seatalk.callback_server")
 
 
+def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
+    admin_codes = set(runtime.get("admin_employee_codes") or [])
+    admin_emails = set(runtime.get("admin_emails") or [])
+    admin_seatalk_ids = set(runtime.get("admin_seatalk_ids") or [])
+    if not (admin_codes or admin_emails or admin_seatalk_ids):
+        return True
+    employee_code = callback_context["employee_code"]
+    email = callback_context["email"].lower()
+    seatalk_id = callback_context["seatalk_id"]
+    return (
+        employee_code in admin_codes
+        or (email and email in admin_emails)
+        or (seatalk_id and seatalk_id in admin_seatalk_ids)
+    )
+
+
+def _format_private_access_denied(callback_context: dict[str, str], *, contact_email: str) -> str:
+    return (
+        "**Bot chi nhan lenh private tu admin da duoc cap quyen.**\n"
+        f"*Vui long lien he {contact_email} de duoc them quyen.*\n"
+        "\n"
+        "*Thong tin dinh danh hien tai cua ban:*\n"
+        f"- employee_code: `{callback_context.get('employee_code') or '-'}`\n"
+        f"- email: `{callback_context.get('email') or '-'}`\n"
+        f"- seatalk_id: `{callback_context.get('seatalk_id') or '-'}`"
+    )
+
+
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -126,6 +154,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "admin_employee_codes": admin_codes,
         "admin_emails": admin_emails,
         "admin_seatalk_ids": admin_seatalk_ids,
+        "admin_contact_email": os.getenv("SEATALK_ADMIN_CONTACT_EMAIL", "ducthao.tran@garena.vn").strip(),
     }
 
 
@@ -262,85 +291,82 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             raw_value = extract_click_value(event)
             click_payload = parse_click_payload(raw_value)
             action = str(click_payload.get("action") or "").strip()
-            if action != "open_report":
+            if action not in {"open_report", "reply_text"}:
                 raise SeatalkCallbackError(f"Unsupported interactive action: {action or '-'}")
+
+            private_client = build_seatalk_client(
+                app_id=runtime["seatalk_app_id"],
+                app_secret=runtime["seatalk_app_secret"],
+                employee_code=employee_code,
+                thread_id=thread_id,
+            )
+            if not _is_authorized_private_sender(runtime, callback_context):
+                private_client.send_text(
+                    _format_private_access_denied(
+                        callback_context,
+                        contact_email=runtime["admin_contact_email"],
+                    )
+                )
+                LOGGER.info(
+                    "Rejected interactive private delivery for unauthorized sender | employee_code=%s | email=%s | seatalk_id=%s",
+                    callback_context["employee_code"],
+                    callback_context["email"] or "-",
+                    callback_context["seatalk_id"] or "-",
+                )
+                return
+
             target_report_code = str(click_payload.get("target_report_code") or "").strip()
-            if not target_report_code:
+            if action == "open_report" and not target_report_code:
                 raise SeatalkCallbackError("Missing target_report_code in callback payload.")
             try:
                 typing_client = build_seatalk_client(
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
-                    group_id=group_id,
-                    employee_code="" if group_id else employee_code,
+                    employee_code=employee_code,
                     thread_id=thread_id,
-                    quoted_message_id=quoted_message_id,
                 )
                 typing_client.set_typing_status()
                 LOGGER.info(
-                    "Seatalk typing status sent | group_id=%s | employee_code=%s | thread_id=%s",
-                    group_id or "-",
+                    "Seatalk typing status sent | employee_code=%s | group_id=%s | thread_id=%s",
                     employee_code or "-",
+                    group_id or "-",
                     thread_id or "-",
                 )
             except Exception:
                 LOGGER.exception(
-                    "Seatalk typing status failed | group_id=%s | employee_code=%s | thread_id=%s",
-                    group_id or "-",
+                    "Seatalk typing status failed | employee_code=%s | group_id=%s | thread_id=%s",
                     employee_code or "-",
+                    group_id or "-",
                     thread_id or "-",
                 )
             if runtime["sync_on_click"]:
                 sync_store_from_github_artifact(runtime)
 
-            package = build_report_package_by_code(
-                runtime["db_path"],
-                report_code=target_report_code,
-                groups_path=runtime["groups_config"],
-                reports_path=runtime["reports_config"],
-                campaigns_path=runtime["campaigns_config"],
-                timezone_name=runtime["report_timezone"],
-                mode=runtime["report_mode"],
-                source_scope={
-                    "category_ids": runtime["preset_category_ids"],
-                    "platform_ids": runtime["preset_platform_ids"],
-                },
-                now=datetime.now(),
-            )
-            message_text = str(package.get("renderedText") or "").strip()
+            if action == "reply_text":
+                message_text = str(click_payload.get("message") or "").strip()
+            else:
+                package = build_report_package_by_code(
+                    runtime["db_path"],
+                    report_code=target_report_code,
+                    groups_path=runtime["groups_config"],
+                    reports_path=runtime["reports_config"],
+                    campaigns_path=runtime["campaigns_config"],
+                    timezone_name=runtime["report_timezone"],
+                    mode=runtime["report_mode"],
+                    source_scope={
+                        "category_ids": runtime["preset_category_ids"],
+                        "platform_ids": runtime["preset_platform_ids"],
+                    },
+                    now=datetime.now(),
+                )
+                message_text = str(package.get("renderedText") or "").strip()
 
-            if group_id:
-                try:
-                    group_client = build_seatalk_client(
-                        app_id=runtime["seatalk_app_id"],
-                        app_secret=runtime["seatalk_app_secret"],
-                        group_id=group_id,
-                        thread_id=thread_id,
-                        quoted_message_id=quoted_message_id,
-                    )
-                    group_client.send_text(message_text)
-                    LOGGER.info(
-                        "Seatalk callback reply sent to group context | group_id=%s | thread_id=%s | quoted_message_id=%s",
-                        group_id,
-                        thread_id or "-",
-                        quoted_message_id or "-",
-                    )
-                    return
-                except Exception:
-                    LOGGER.exception(
-                        "Seatalk group/thread reply failed; falling back to private reply | group_id=%s | thread_id=%s | quoted_message_id=%s",
-                        group_id,
-                        thread_id or "-",
-                        quoted_message_id or "-",
-                    )
-
-            client = build_seatalk_client(
-                app_id=runtime["seatalk_app_id"],
-                app_secret=runtime["seatalk_app_secret"],
-                employee_code=employee_code,
+            private_client.send_text(message_text)
+            LOGGER.info(
+                "Seatalk callback reply sent as private message | employee_code=%s | from_group=%s",
+                employee_code,
+                group_id or "-",
             )
-            client.send_text(message_text)
-            LOGGER.info("Seatalk callback reply sent as private message | employee_code=%s", employee_code)
 
         def _handle_private_message(self, event: dict[str, Any]) -> None:
             callback_context = build_callback_context(event)
@@ -349,37 +375,25 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
             )
             employee_code = callback_context["employee_code"]
-            email = callback_context["email"].lower()
-            seatalk_id = callback_context["seatalk_id"]
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in private message event.")
-            admin_codes = set(runtime.get("admin_employee_codes") or [])
-            admin_emails = set(runtime.get("admin_emails") or [])
-            admin_seatalk_ids = set(runtime.get("admin_seatalk_ids") or [])
-            allowlist_enabled = bool(admin_codes or admin_emails or admin_seatalk_ids)
-            is_authorized = (
-                employee_code in admin_codes
-                or (email and email in admin_emails)
-                or (seatalk_id and seatalk_id in admin_seatalk_ids)
-            )
-            if allowlist_enabled and not is_authorized:
+            if not _is_authorized_private_sender(runtime, callback_context):
                 client = build_seatalk_client(
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
                     employee_code=employee_code,
                 )
                 client.send_text(
-                    "**Bot chi nhan lenh private tu admin da duoc cap quyen.**\n"
-                    "*Ban co the them mot trong cac dinh danh sau vao Railway:*\n"
-                    f"- employee_code: `{employee_code or '-'}`\n"
-                    f"- email: `{email or '-'}`\n"
-                    f"- seatalk_id: `{seatalk_id or '-'}`"
+                    _format_private_access_denied(
+                        callback_context,
+                        contact_email=runtime["admin_contact_email"],
+                    )
                 )
                 LOGGER.info(
                     "Rejected private command from unauthorized sender | employee_code=%s | email=%s | seatalk_id=%s",
-                    employee_code,
-                    email or "-",
-                    seatalk_id or "-",
+                    callback_context["employee_code"],
+                    callback_context["email"] or "-",
+                    callback_context["seatalk_id"] or "-",
                 )
                 return
 

@@ -182,6 +182,7 @@ jobs:
             --build-configured-reports \
             --load-store outputs/ffvn_master.sqlite \
             --save-report outputs/ffvn_master_reports.json \
+            --save-history outputs/ffvn_daily_snapshot.json \
             --save-rendered-dir outputs/rendered_reports \
             ${extra_args}
 
@@ -242,5 +243,6 @@ jobs:
           name: ffvn-daily-send-latest
           path: |
             outputs/ffvn_master_reports.json
+            outputs/ffvn_daily_snapshot.json
             outputs/rendered_reports
           if-no-files-found: warn

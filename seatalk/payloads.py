@@ -59,6 +59,14 @@ def build_report_interactive_payload(package: dict) -> dict:
     )
 
 
+def build_interactive_group_payload(group: dict) -> dict:
+    return build_interactive_payload(
+        title=str(group.get("title") or "Mo rong bao cao").strip(),
+        description=str(group.get("description") or "").strip(),
+        actions=list(group.get("actions") or []),
+    )
+
+
 def build_callback_report_payload(*, title: str, summary: str) -> dict:
     return build_interactive_payload(
         title=title,
