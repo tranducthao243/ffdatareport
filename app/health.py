@@ -96,6 +96,13 @@ def extract_hashtag_query(text: str) -> str:
     return query.lstrip("#").strip()
 
 
+def category_display_name(category_id: int | None, category_name: str) -> str:
+    name = str(category_name or "").strip()
+    if name:
+        return name
+    return CATEGORY_LABELS.get(category_id or -1, f"Category {category_id or '-'}")
+
+
 def list_active_campaigns(campaigns_config: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
     today = (now or datetime.now()).date()
     active: list[dict[str, Any]] = []
@@ -298,7 +305,7 @@ def format_data_report(snapshot: dict[str, Any]) -> str:
     else:
         lines.append("- Campaign đang active: không có")
     if platform_counts:
-        lines.append("- Phân bố theo nền tảng:")
+        lines.append("- Phân bổ theo nền tảng:")
         for platform, count in platform_counts.items():
             lines.append(f"  - {platform}: {count} bài")
     return "\n".join(lines)
@@ -351,15 +358,20 @@ def format_hashtag_report(db_path: Path, text: str) -> str:
 
     category_totals: dict[str, dict[str, int]] = {}
     for post in matched:
-        label = CATEGORY_LABELS.get(post.category_id or -1, post.category_name or f"Category {post.category_id or '-'}")
+        label = category_display_name(post.category_id, post.category_name)
         entry = category_totals.setdefault(label, {"views": 0, "contents": 0})
         entry["views"] += int(post.view)
         entry["contents"] += 1
 
+    min_date = min(post.published_date for post in matched).isoformat()
+    max_date = max(post.published_date for post in matched).isoformat()
+    total_views = sum(post.view for post in matched)
+
     lines = [
         "**Kiểm tra hashtag**",
         f"- Hashtag: `#{query}`",
-        f"- Tổng view: {compact_number(sum(post.view for post in matched))}",
+        f"- Khung dữ liệu: `{min_date} -> {max_date}`",
+        f"- Tổng view: {compact_number(total_views)}",
         f"- Tổng nội dung: {len(matched)}",
         "",
         "**Phân bổ theo category**",

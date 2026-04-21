@@ -75,8 +75,9 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             self.assertIn("Hashtag: `#ob53`", answer)
             self.assertIn("Tổng view: 700.0K", answer)
-            self.assertIn("Trend nh", answer)
-            self.assertIn("Roblox Content", answer)
+            self.assertIn("Khung dữ liệu: `2026-04-17 -> 2026-04-18`", answer)
+            self.assertIn("Trend Dance", answer)
+            self.assertIn("Roblox", answer)
 
     def test_render_seatalk_report_legacy_fallback_keeps_summary(self):
         report = {

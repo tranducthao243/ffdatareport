@@ -17,6 +17,7 @@
     {
       "name": "ffvn_campaign_daily",
       "enabled": true,
+      "send_enabled": false,
       "report_code": "TOPD_REPORT",
       "title": "Báo cáo Campaign",
       "group_id_env": "SEATALK_CAMPAIGN_GROUP_ID",
