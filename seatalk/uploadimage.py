@@ -115,6 +115,15 @@ def _safe_filename_stem(filename_hint: str) -> str:
     return cleaned[:60] or "seatalk-image"
 
 
+def _filename_match_tokens(image_path: Path) -> list[str]:
+    stem = image_path.stem
+    tokens = [image_path.name, stem]
+    if len(stem) >= 16:
+        tokens.append(stem[:16])
+        tokens.append(stem[-16:])
+    return [token for token in tokens if token]
+
+
 def download_seatalk_image(
     *,
     image_url: str,
@@ -261,30 +270,47 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Save button was not clickable.") from exc
 
+        filename_tokens = _filename_match_tokens(image_path)
         LOGGER.info(
-            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s",
+            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s | filename_tokens=%s",
             image_path,
             result_timeout_ms,
             len(existing_urls),
+            filename_tokens,
         )
         deadline = time.monotonic() + (result_timeout_ms / 1000)
         new_urls: list[str] = []
+        matched_row_found = False
         while time.monotonic() < deadline:
-            urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-            new_urls = [url for url in urls if url not in existing_urls]
-            if new_urls:
-                break
+            row_match = None
+            for token in filename_tokens:
+                candidate = page.locator("tbody tr", has_text=token).last
+                if candidate.count() > 0:
+                    row_match = candidate
+                    break
+            if row_match is not None:
+                row_html = row_match.inner_html()
+                row_urls = _extract_public_urls(row_html, public_url_prefix=public_url_prefix)
+                new_urls = [url for url in row_urls if url not in existing_urls]
+                if new_urls:
+                    matched_row_found = True
+                    break
+            if int((deadline - time.monotonic()) * 1000) > 1500:
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
+                except PlaywrightTimeoutError:
+                    LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
             page.wait_for_timeout(1000)
 
-        if new_urls:
+        if matched_row_found and new_urls:
             LOGGER.info(
-                "Vendor result new URL candidates found | image_path=%s | urls=%s",
+                "Vendor result row matched uploaded file | image_path=%s | urls=%s",
                 image_path,
                 new_urls,
             )
         else:
             LOGGER.warning(
-                "Vendor result page contains no new public URL after save | image_path=%s | timeout_ms=%s",
+                "Vendor result row with uploaded file did not produce a new public URL | image_path=%s | timeout_ms=%s",
                 image_path,
                 result_timeout_ms,
             )
@@ -293,7 +319,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
     final_url = (new_urls or [""])[0]
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
-        raise UploadImageError("Da bam Save nhung khong thay link anh public moi xuat hien tren trang ket qua.")
+        raise UploadImageError("Da bam Save nhung khong thay dong ket qua khop voi file vua upload tren Vendor Tool.")
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 
