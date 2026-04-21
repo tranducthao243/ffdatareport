@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -115,15 +116,17 @@ def _guess_extension(response: requests.Response, image_url: str) -> str:
 
 def _safe_filename_stem(filename_hint: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "-", str(filename_hint or "").strip()).strip("-")
-    return cleaned[:60] or "seatalk-image"
+    token_source = str(filename_hint or cleaned or "seatalk-image")
+    token = hashlib.sha1(token_source.encode("utf-8")).hexdigest()[:12]
+    prefix = cleaned[:12] or "seatalk"
+    return f"{prefix}-{token}"
 
 
 def _filename_match_tokens(image_path: Path) -> list[str]:
     stem = image_path.stem
     tokens = [image_path.name, stem]
-    if len(stem) >= 16:
-        tokens.append(stem[:16])
-        tokens.append(stem[-16:])
+    if "-" in stem:
+        tokens.append(stem.rsplit("-", 1)[-1])
     return [token for token in tokens if token]
 
 

@@ -17,6 +17,8 @@ from seatalk.interactive import build_interactive_actions, build_interactive_gro
 from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
 from seatalk.uploadimage import (
+    _filename_match_tokens,
+    _safe_filename_stem,
     get_latest_unprocessed_image_for_user,
     mark_image_processed_for_user,
     store_latest_image_for_user,
@@ -240,6 +242,14 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             mark_image_processed_for_user(store_path, employee_code="110677")
             self.assertIsNone(get_latest_unprocessed_image_for_user(store_path, employee_code="110677"))
+
+    def test_uploadimage_filename_tokens_use_unique_hash_suffix(self):
+        stem_one = _safe_filename_stem("u7YirumAclDz6kjP41NhyMkXvXNAhNTqCAnQvTUQ9YuCzzoUoFE7bJ5O")
+        stem_two = _safe_filename_stem("u7YirumAclDz6kjP41NhyMk5vXNAhNTqCAkhGig01ZHLFKK7Ns21ug0K")
+
+        self.assertNotEqual(stem_one, stem_two)
+        self.assertNotEqual(stem_one.rsplit("-", 1)[-1], stem_two.rsplit("-", 1)[-1])
+        self.assertIn(stem_one.rsplit("-", 1)[-1], _filename_match_tokens(Path(f"{stem_one}.jpg")))
 
     def test_callback_server_build_runtime_reads_preset_data(self):
         class Args:
