@@ -11,7 +11,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
 
     return [
         {
-            "label": "Xem campaign",
+            "label": "Xem Campaign",
             "actionType": "open_report",
             "targetReportCode": "TOPD_REPORT",
             "actionGroup": "campaign_official",
