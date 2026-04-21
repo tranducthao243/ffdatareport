@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
 from seatalk.callbacks import build_callback_context, extract_click_value, extract_message_text, parse_click_payload
@@ -8,9 +9,75 @@ from seatalk.callback_server import build_runtime
 from seatalk.interactive import build_interactive_actions, build_interactive_groups
 from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
+from app.pipeline import build_store_from_export
+from datasocial.exporter import export_rows_to_csv_bytes
+import tempfile
+from pathlib import Path
 
 
 class DatasocialSeatalkFormatterTests(unittest.TestCase):
+    def test_hashtag_command_is_detected_with_and_without_space(self):
+        self.assertEqual(classify_private_command("hashtag ob53"), "hashtag")
+        self.assertEqual(classify_private_command("hashtagob53"), "hashtag")
+        self.assertEqual(extract_hashtag_query("hashtag #ob53"), "ob53")
+        self.assertEqual(extract_hashtag_query("hashtagob53"), "ob53")
+
+    def test_format_hashtag_report_summarizes_views_by_category(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "Dance One",
+                "Category": "Trend Dance",
+                "__category_id": "119",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #ob53",
+                "Link": "https://www.tiktok.com/@dance/video/1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            },
+            {
+                "ID": "2",
+                "Platform": "Youtube",
+                "Channel id": "yt-1",
+                "Channel name": "Roblox One",
+                "Category": "Roblox",
+                "__category_id": "368",
+                "Post id": "yt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 2 #ob53",
+                "Link": "https://www.youtube.com/watch?v=1",
+                "Publish time": "2026-04-18 11:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "5",
+                "Duration (second)": "20",
+                "Engagement": "40",
+                "Reaction": "20",
+                "View": "200000",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            answer = format_hashtag_report(db_path, "hashtagob53")
+
+            self.assertIn("Hashtag: `#ob53`", answer)
+            self.assertIn("Tổng view: 700.0K", answer)
+            self.assertIn("Trend nh", answer)
+            self.assertIn("Roblox Content", answer)
+
     def test_render_seatalk_report_legacy_fallback_keeps_summary(self):
         report = {
             "generatedAt": "2026-04-12T07:30:33Z",
@@ -73,13 +140,13 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         groups = build_interactive_groups(package)
 
         self.assertEqual(len(groups), 2)
-        self.assertEqual(groups[0]["title"], "Mở rộng báo cáo")
+        self.assertIn("Campaign", groups[0]["description"])
         self.assertEqual(len(groups[0]["actions"]), 2)
-        self.assertEqual(groups[1]["title"], "Theo dõi trend")
+        self.assertIn("Trend", groups[1]["description"])
         self.assertEqual(len(groups[1]["actions"]), 2)
 
         payload = build_interactive_group_payload(groups[0])
-        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Mở rộng báo cáo")
+        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Mo rong bao cao")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')

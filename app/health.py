@@ -5,6 +5,7 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from analyze.common import load_posts
 from normalize import sqlite_store_summary
 
 
@@ -74,6 +75,8 @@ def classify_private_command(text: str) -> str:
         return "roblox"
     if normalized in {"webcompany", "web", "link", "links"}:
         return "web"
+    if normalized.startswith("hashtag"):
+        return "hashtag"
     if normalized in {"shortlink", "link ngan", "tao shortlink", "rut gon link"}:
         return "shortlink"
     if normalized in {"uploadimage", "upload anh", "gui anh len web", "up anh"}:
@@ -83,6 +86,14 @@ def classify_private_command(text: str) -> str:
     if normalized in {"removebg", "tach nen", "xoa nen", "remove background"}:
         return "removebg"
     return "unknown"
+
+
+def extract_hashtag_query(text: str) -> str:
+    normalized = normalize_command_text(text)
+    if not normalized.startswith("hashtag"):
+        return ""
+    query = normalized[len("hashtag"):].strip()
+    return query.lstrip("#").strip()
 
 
 def list_active_campaigns(campaigns_config: list[dict[str, Any]], now: datetime | None = None) -> list[dict[str, Any]]:
@@ -318,6 +329,51 @@ def format_campaign_status_report(snapshot: dict[str, Any]) -> str:
         lines.append(
             f"- {item['name']} | `{item['startDate']} -> {item['endDate']}` | KPI {compact_number(item['kpiTarget'])}"
         )
+    return "\n".join(lines)
+
+
+def format_hashtag_report(db_path: Path, text: str) -> str:
+    query = extract_hashtag_query(text)
+    if not query:
+        return (
+            "**Kiểm tra hashtag**\n"
+            "*Cách dùng: `hashtag ob53` hoặc `hashtagob53`.*"
+        )
+
+    posts = load_posts(db_path)
+    matched = [post for post in posts if query in {tag.lstrip("#").lower() for tag in post.hashtags}]
+    if not matched:
+        return (
+            "**Kiểm tra hashtag**\n"
+            f"- Không tìm thấy dữ liệu cho hashtag `#{query}` trong kho dữ liệu hiện tại.\n"
+            "*Cách dùng: `hashtag ob53` hoặc `hashtagob53`.*"
+        )
+
+    category_totals: dict[str, dict[str, int]] = {}
+    for post in matched:
+        label = CATEGORY_LABELS.get(post.category_id or -1, post.category_name or f"Category {post.category_id or '-'}")
+        entry = category_totals.setdefault(label, {"views": 0, "contents": 0})
+        entry["views"] += int(post.view)
+        entry["contents"] += 1
+
+    lines = [
+        "**Kiểm tra hashtag**",
+        f"- Hashtag: `#{query}`",
+        f"- Tổng view: {compact_number(sum(post.view for post in matched))}",
+        f"- Tổng nội dung: {len(matched)}",
+        "",
+        "**Phân bổ theo category**",
+    ]
+    for label, totals in sorted(category_totals.items(), key=lambda item: (item[1]["views"], item[1]["contents"]), reverse=True):
+        if totals["contents"] <= 0:
+            continue
+        lines.append(f"- {label}: {compact_number(totals['views'])} view | {totals['contents']} nội dung")
+    lines.extend(
+        [
+            "",
+            "*Cách dùng: `hashtag ob53` hoặc `hashtagob53`.*",
+        ]
+    )
     return "\n".join(lines)
 
 

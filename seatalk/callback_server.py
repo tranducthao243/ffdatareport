@@ -22,6 +22,7 @@ from app.data_chat import answer_data_question
 from app.health import (
     build_health_snapshot,
     classify_private_command,
+    format_hashtag_report,
     format_data_report,
     format_health_report,
     format_scope_report,
@@ -477,6 +478,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                             if item.get("note"):
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
+            elif command == "hashtag":
+                reply_text = format_hashtag_report(runtime["db_path"], message_text)
             elif command in {"shortlink", "uploadimage", "enhanceimage", "removebg"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
@@ -491,6 +494,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "\n"
                     "**Tiện ích**\n"
                     "- `web`: liệt kê các link web quan trọng của team\n"
+                    "- `hashtag`: kiểm tra view và phân bổ category theo hashtag\n"
                     "\n"
                     "**Dữ liệu KOLs**\n"
                     "- `campaign`: báo cáo campaign hiện tại\n"
@@ -506,6 +510,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "\n"
                     "**Hướng dẫn**\n"
                     "- `help`: xem menu này và cách dùng bot\n"
+                    "- Gõ `hashtag ob53` hoặc `hashtagob53` để check hashtag\n"
                 )
             else:
                 reply_text = answer_data_question(
