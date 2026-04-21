@@ -37,6 +37,16 @@ from .callbacks import (
     extract_click_value,
     parse_click_payload,
 )
+from .uploadimage import (
+    UploadImageError,
+    download_seatalk_image,
+    get_image_store_path,
+    get_latest_unprocessed_image_for_user,
+    mark_image_processed_for_user,
+    send_seatalk_text_reply,
+    store_latest_image_for_user,
+    upload_image_to_vendor_tool,
+)
 
 
 LOGGER = logging.getLogger("seatalk.callback_server")
@@ -412,6 +422,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            if callback_context.get("message_tag") == "image":
+                self._handle_private_image_message(callback_context)
+                return
+
             message_text = callback_context["message_text"]
             command = classify_private_command(message_text)
             thread_id = callback_context["thread_id"] or callback_context["message_id"]
@@ -480,7 +494,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
                 reply_text = format_hashtag_report(runtime["db_path"], message_text)
-            elif command in {"shortlink", "uploadimage", "enhanceimage", "removebg"}:
+            elif command == "uploadimage":
+                reply_text = self._handle_uploadimage_command(callback_context)
+            elif command in {"shortlink", "enhanceimage", "removebg"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
                 reply_text = (
@@ -527,6 +543,82 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 "Seatalk private command reply sent | employee_code=%s | command=%s",
                 employee_code,
                 command,
+            )
+
+        def _handle_private_image_message(self, callback_context: dict[str, str]) -> None:
+            employee_code = callback_context["employee_code"]
+            image_url = callback_context.get("image_url", "")
+            if not image_url:
+                raise SeatalkCallbackError("Image message missing image URL.")
+
+            store_latest_image_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+                seatalk_id=callback_context.get("seatalk_id", ""),
+                message_id=callback_context.get("message_id", ""),
+                image_url=image_url,
+                thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+            )
+
+            client = build_seatalk_client(
+                app_id=runtime["seatalk_app_id"],
+                app_secret=runtime["seatalk_app_secret"],
+                employee_code=employee_code,
+                thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+            )
+            send_seatalk_text_reply(
+                client,
+                (
+                    "**Đã nhận ảnh gần nhất của bạn**\n"
+                    "*Gõ `uploadimage` để tải ảnh lên web nội bộ và nhận link kết quả.*"
+                ),
+            )
+
+        def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
+            employee_code = callback_context["employee_code"]
+            LOGGER.info("Seatalk uploadimage command received | employee_code=%s", employee_code)
+            image_entry = get_latest_unprocessed_image_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+            )
+            if not image_entry:
+                return (
+                    "**Chưa có ảnh nào để tải lên**\n"
+                    "*Hãy gửi một ảnh cho bot trước, sau đó gõ `uploadimage`.*"
+                )
+
+            try:
+                image_path = download_seatalk_image(
+                    image_url=str(image_entry.get("image_url") or "").strip(),
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                )
+            except Exception as exc:
+                LOGGER.exception("Seatalk image download failure | employee_code=%s", employee_code)
+                return (
+                    "**Tải ảnh từ Seatalk thất bại**\n"
+                    f"*Chi tiết: {exc}*"
+                )
+
+            try:
+                final_url = upload_image_to_vendor_tool(image_path)
+            except UploadImageError as exc:
+                LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
+                return (
+                    "**Upload ảnh lên Vendor Tool thất bại**\n"
+                    f"*Chi tiết: {exc}*"
+                )
+            except Exception as exc:
+                LOGGER.exception("Unexpected vendor upload failure | employee_code=%s", employee_code)
+                return (
+                    "**Upload ảnh lên Vendor Tool thất bại**\n"
+                    f"*Chi tiết: {exc}*"
+                )
+
+            mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
+            return (
+                "**Upload ảnh thành công**\n"
+                f"- Link ảnh: {final_url}"
             )
 
         def _build_report_text(self, report_code: str) -> str:

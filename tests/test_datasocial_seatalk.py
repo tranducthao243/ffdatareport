@@ -4,11 +4,23 @@ from unittest.mock import Mock, patch
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
-from seatalk.callbacks import build_callback_context, extract_click_value, extract_message_text, parse_click_payload
+from seatalk.callbacks import (
+    build_callback_context,
+    extract_click_value,
+    extract_message_image_url,
+    extract_message_tag,
+    extract_message_text,
+    parse_click_payload,
+)
 from seatalk.callback_server import build_runtime
 from seatalk.interactive import build_interactive_actions, build_interactive_groups
 from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
+from seatalk.uploadimage import (
+    get_latest_unprocessed_image_for_user,
+    mark_image_processed_for_user,
+    store_latest_image_for_user,
+)
 from app.pipeline import build_store_from_export
 from datasocial.exporter import export_rows_to_csv_bytes
 import tempfile
@@ -184,6 +196,50 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         event = {"message": {"text": {"plain_text": "health"}}}
 
         self.assertEqual(extract_message_text(event), "health")
+
+    def test_extract_message_image_url_reads_private_image_event(self):
+        event = {
+            "message": {
+                "tag": "image",
+                "image": {"content": "https://openapi.seatalk.io/messaging/v2/file/example"},
+            }
+        }
+
+        self.assertEqual(extract_message_tag(event), "image")
+        self.assertEqual(
+            extract_message_image_url(event),
+            "https://openapi.seatalk.io/messaging/v2/file/example",
+        )
+
+    def test_uploadimage_store_keeps_latest_unprocessed_image_per_user(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store_path = Path(tmp) / "seatalk_images.json"
+
+            store_latest_image_for_user(
+                store_path,
+                employee_code="110677",
+                seatalk_id="9306358918",
+                message_id="m1",
+                image_url="https://openapi.seatalk.io/messaging/v2/file/m1",
+                thread_id="m1",
+            )
+            store_latest_image_for_user(
+                store_path,
+                employee_code="110677",
+                seatalk_id="9306358918",
+                message_id="m2",
+                image_url="https://openapi.seatalk.io/messaging/v2/file/m2",
+                thread_id="m2",
+            )
+
+            latest = get_latest_unprocessed_image_for_user(store_path, employee_code="110677")
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest["message_id"], "m2")
+            self.assertFalse(latest["processed"])
+
+            mark_image_processed_for_user(store_path, employee_code="110677")
+            self.assertIsNone(get_latest_unprocessed_image_for_user(store_path, employee_code="110677"))
 
     def test_callback_server_build_runtime_reads_preset_data(self):
         class Args:

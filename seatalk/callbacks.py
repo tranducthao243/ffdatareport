@@ -111,6 +111,20 @@ def extract_message_text(event: dict[str, Any]) -> str:
     )
 
 
+def extract_message_tag(event: dict[str, Any]) -> str:
+    return _first_non_empty(
+        event.get("tag"),
+        event.get("message", {}).get("tag"),
+    )
+
+
+def extract_message_image_url(event: dict[str, Any]) -> str:
+    return _first_non_empty(
+        event.get("image", {}).get("content"),
+        event.get("message", {}).get("image", {}).get("content"),
+    )
+
+
 def build_callback_context(event: dict[str, Any]) -> dict[str, str]:
     return {
         "employee_code": extract_sender_employee_code(event),
@@ -122,6 +136,8 @@ def build_callback_context(event: dict[str, Any]) -> dict[str, str]:
         "quoted_message_id": extract_quoted_message_id(event),
         "click_value": extract_click_value(event),
         "message_text": extract_message_text(event),
+        "message_tag": extract_message_tag(event),
+        "image_url": extract_message_image_url(event),
     }
 
 
