@@ -21,19 +21,24 @@ def build_interactive_payload(
             }
         )
 
-    elements = [
-        {
-            "element_type": "title",
-            "title": {"text": title},
-        },
-        {
-            "element_type": "description",
-            "description": {
-                "format": 1,
-                "text": description,
-            },
-        },
-    ]
+    elements = []
+    if str(title or "").strip():
+        elements.append(
+            {
+                "element_type": "title",
+                "title": {"text": title},
+            }
+        )
+    if str(description or "").strip():
+        elements.append(
+            {
+                "element_type": "description",
+                "description": {
+                    "format": 1,
+                    "text": description,
+                },
+            }
+        )
     if buttons:
         elements.append(
             {
@@ -61,7 +66,7 @@ def build_report_interactive_payload(package: dict) -> dict:
 
 def build_interactive_group_payload(group: dict) -> dict:
     return build_interactive_payload(
-        title=str(group.get("title") or "Mo rong bao cao").strip(),
+        title=str(group.get("title") or "").strip(),
         description=str(group.get("description") or "").strip(),
         actions=list(group.get("actions") or []),
     )

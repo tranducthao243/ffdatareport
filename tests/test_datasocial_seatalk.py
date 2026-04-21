@@ -159,7 +159,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(len(groups[1]["actions"]), 2)
 
         payload = build_interactive_group_payload(groups[0])
-        self.assertEqual(payload["interactive_message"]["elements"][0]["title"]["text"], "Mo rong bao cao")
+        self.assertEqual(payload["interactive_message"]["elements"][0]["element_type"], "description")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
