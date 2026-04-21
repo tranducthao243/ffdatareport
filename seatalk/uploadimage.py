@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -266,26 +267,15 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             result_timeout_ms,
             len(existing_urls),
         )
-        try:
-            page.wait_for_function(
-                """([prefix, seen]) => {
-                    const html = document.body.innerHTML || '';
-                    const regex = new RegExp(prefix.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + "[^\\s\\\"'<>]+", 'g');
-                    const matches = Array.from(html.matchAll(regex)).map(m => m[0].split('?')[0]);
-                    return matches.some(url => !seen.includes(url));
-                }""",
-                arg=[public_url_prefix, existing_urls],
-                timeout=result_timeout_ms,
-            )
-        except PlaywrightTimeoutError:
-            LOGGER.warning(
-                "Vendor result URL did not appear before timeout | image_path=%s | timeout_ms=%s",
-                image_path,
-                result_timeout_ms,
-            )
+        deadline = time.monotonic() + (result_timeout_ms / 1000)
+        new_urls: list[str] = []
+        while time.monotonic() < deadline:
+            urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+            new_urls = [url for url in urls if url not in existing_urls]
+            if new_urls:
+                break
+            page.wait_for_timeout(1000)
 
-        urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-        new_urls = [url for url in urls if url not in existing_urls]
         if new_urls:
             LOGGER.info(
                 "Vendor result new URL candidates found | image_path=%s | urls=%s",
@@ -294,8 +284,9 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             )
         else:
             LOGGER.warning(
-                "Vendor result page contains no new public URL after save | image_path=%s",
+                "Vendor result page contains no new public URL after save | image_path=%s | timeout_ms=%s",
                 image_path,
+                result_timeout_ms,
             )
         browser.close()
 
