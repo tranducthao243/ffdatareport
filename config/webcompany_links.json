@@ -9,8 +9,7 @@
         },
         {
           "label": "Request Mission",
-          "url": "https://creativelab.garena.vn",
-          "note": "Tạo link shortlink."
+          "url": "https://docs.google.com/spreadsheets/d/11RMWH47t-Kbhp23xszR785Slz-7DvNEO1EfKzo6AqEk/edit?gid=473731344#gid=473731344",
         },
         {
           "label": "PowerBI",
@@ -23,6 +22,10 @@
         {
           "label": "Website FF",
           "url": "https://ff.garena.com"
+        },
+        {
+          "label": "Quản Lý Tool",
+          "url": "https://quanly.ff.garena.vn"
         }
       ]
     },
