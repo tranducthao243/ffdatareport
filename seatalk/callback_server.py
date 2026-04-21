@@ -494,7 +494,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "\n"
                     "**Tiện ích**\n"
                     "- `web`: liệt kê các link web quan trọng của team\n"
-                    "- `hashtag`: kiểm tra view và phân bổ category theo hashtag\n"
+                    "- `hashtag`: gõ hashtag và tên hashtag để check data\n"
                     "\n"
                     "**Dữ liệu KOLs**\n"
                     "- `campaign`: báo cáo campaign hiện tại\n"
@@ -510,7 +510,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "\n"
                     "**Hướng dẫn**\n"
                     "- `help`: xem menu này và cách dùng bot\n"
-                    "- Gõ `hashtag ob53` hoặc `hashtagob53` để check hashtag\n"
                 )
             else:
                 reply_text = answer_data_question(
