@@ -11,6 +11,7 @@ from seatalk import build_interactive_actions, build_seatalk_client, send_report
 
 from .config_loader import (
     format_validation_errors,
+    is_group_send_enabled,
     load_json,
     resolve_group_target,
     validate_reporting_config,
@@ -57,9 +58,17 @@ def build_configured_reports(
     if validation["errors"]:
         raise DatasocialError(format_validation_errors(validation))
 
+    groups_for_send = {
+        "groups": [
+            group
+            for group in groups_config.get("groups", [])
+            if bool(group.get("enabled", True)) and is_group_send_enabled(group)
+        ]
+    }
+
     packages = build_report_packages(
         db_path,
-        groups_config=groups_config,
+        groups_config=groups_for_send,
         reports_config=reports_config,
         campaigns_config=campaigns_config,
         invalid_group_names=set(validation["invalidGroupNames"]),

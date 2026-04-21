@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from app.health import format_health_alert
-from app.pipeline import build_configured_reports, build_store_from_export
+from app.pipeline import build_configured_reports, build_report_package_by_code, build_store_from_export
 from datasocial.exceptions import DatasocialError
 from datasocial.exporter import export_rows_to_csv_bytes
 
@@ -478,6 +478,113 @@ class DataMasterPhase1Tests(unittest.TestCase):
             self.assertIn("**Cảnh báo dữ liệu FFVN**", alert_text)
             self.assertIn("**Nghiêm trọng**", alert_text)
             self.assertIn("Official mất data", alert_text)
+
+
+    def test_send_disabled_group_is_available_for_private_report_only(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-camp-1",
+                "Channel name": "Campaign TT",
+                "Category": "Gameplay_Creator",
+                "__category_id": "14",
+                "Post id": "camp-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Campaign clip #ob53",
+                "Link": "https://www.tiktok.com/@camp/video/1",
+                "Publish time": "2026-04-17 09:30:00",
+                "Hashtag": "#ob53 #giaitriob53",
+                "Comment": "3",
+                "Duration (second)": "25",
+                "Engagement": "50",
+                "Reaction": "30",
+                "View": "300000",
+            },
+        ]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            groups_path = root / "groups.json"
+            reports_path = root / "reports.json"
+            campaigns_path = root / "campaigns.json"
+            groups_path.write_text(
+                json.dumps(
+                    {
+                        "groups": [
+                            {"name": "main", "enabled": True, "report_code": "SO1", "group_id": "g-main"},
+                            {
+                                "name": "campaign_private",
+                                "enabled": True,
+                                "send_enabled": False,
+                                "report_code": "TOPD_REPORT",
+                                "campaign_names": ["OB53"],
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            reports_path.write_text(
+                json.dumps(
+                    {
+                        "reports": {
+                            "SO1": {"sections": ["TOPA", "TOPB", "TOPC", "TOPE"]},
+                            "TOPD_REPORT": {"sections": ["TOPD"]},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            campaigns_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "name": "OB53",
+                            "hashtags": ["ob53", "giaitriob53"],
+                            "kpi_view_target": 1000000,
+                            "start_date": "2026-04-15",
+                            "end_date": "2026-04-30",
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            payload = build_configured_reports(
+                db_path,
+                groups_path=groups_path,
+                reports_path=reports_path,
+                campaigns_path=campaigns_path,
+                timezone_name="Asia/Ho_Chi_Minh",
+                mode="complete_previous_day",
+                source_scope={"category_ids": [14], "platform_ids": [0]},
+                now=datetime(2026, 4, 18, 9, 0, 0),
+                send=False,
+            )
+
+            self.assertEqual(payload["packageCount"], 1)
+            self.assertEqual(payload["packages"][0]["groupName"], "main")
+
+            package = build_report_package_by_code(
+                db_path,
+                report_code="TOPD_REPORT",
+                groups_path=groups_path,
+                reports_path=reports_path,
+                campaigns_path=campaigns_path,
+                timezone_name="Asia/Ho_Chi_Minh",
+                mode="complete_previous_day",
+                source_scope={"category_ids": [14], "platform_ids": [0]},
+                now=datetime(2026, 4, 18, 9, 0, 0),
+            )
+
+            topd = next(item for item in package["sections"] if item["code"] == "TOPD")
+            self.assertEqual(topd["campaigns"][0]["campaignName"], "OB53")
 
 
 if __name__ == "__main__":

@@ -24,6 +24,10 @@ def resolve_group_target(group: dict[str, Any]) -> str:
     return ""
 
 
+def is_group_send_enabled(group: dict[str, Any]) -> bool:
+    return bool(group.get("send_enabled", True))
+
+
 def validate_reporting_config(
     groups_config: dict[str, Any],
     reports_config: dict[str, Any],
@@ -93,6 +97,7 @@ def validate_reporting_config(
         state = {
             "groupName": name,
             "enabled": enabled,
+            "sendEnabled": is_group_send_enabled(group),
             "reportCode": report_code,
             "status": "disabled" if not enabled else "valid",
             "messages": [],
@@ -226,7 +231,7 @@ def validate_reporting_config(
                 state["status"] = "blocked"
                 state["messages"].append("official_source_disabled")
 
-        if not state["resolvedGroupId"]:
+        if state["sendEnabled"] and not state["resolvedGroupId"]:
             warnings.append(
                 {
                     "code": "missing_group_id",
