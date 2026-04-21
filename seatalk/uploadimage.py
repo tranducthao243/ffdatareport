@@ -211,7 +211,12 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
 
         checkbox = page.locator("input[type='checkbox']").first
         if checkbox.count() > 0:
-            checkbox.check(force=True)
+            try:
+                if checkbox.is_checked():
+                    checkbox.uncheck(force=True)
+                    LOGGER.info("Vendor sensitive-data checkbox unchecked before save | image_path=%s", image_path)
+            except Exception:
+                LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
         existing_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
         try:
