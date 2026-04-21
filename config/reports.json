@@ -1,27 +1,27 @@
 {
   "reports": {
     "SO1": {
-      "title": "SO1 - Báo cáo tổng hợp",
+      "title": "Báo cáo tổng hợp",
       "sections": ["TOPA", "TOPB", "TOPC", "TOPE"]
     },
     "SO2": {
-      "title": "SO2 - Báo cáo rút gọn",
+      "title": "Báo cáo rút gọn",
       "sections": ["TOPA", "TOPB", "TOPC"]
     },
     "TOPD_REPORT": {
-      "title": "TOPD - Báo cáo campaign",
+      "title": "Báo cáo Campaign",
       "sections": ["TOPD"]
     },
     "TOPF_REPORT": {
-      "title": "TOPF - Báo cáo Official",
+      "title": "Báo cáo Kênh Official",
       "sections": ["TOPF"]
     },
     "TOPG_REPORT": {
-      "title": "TOPG - Báo cáo Trend Nhảy",
+      "title": "Báo cáo Trend Nhảy",
       "sections": ["TOPG"]
     },
     "TOPH_REPORT": {
-      "title": "TOPH - Báo cáo Roblox Content",
+      "title": "Báo cáo Roblox Content",
       "sections": ["TOPH"]
     }
   }
