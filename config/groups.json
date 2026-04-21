@@ -12,7 +12,7 @@
       "enabled": true,
       "report_code": "SO2",
       "title": "Báo cáo tự động Nhà Sáng Tạo Free Fire",
-      "group_id_env": "SEATALK_CAMPAIGN_GROUP_ID",
+      "group_id_env": "SEATALK_CAMPAIGN_GROUP_ID"
     }
   ]
 }
