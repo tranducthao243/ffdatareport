@@ -1,6 +1,7 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
   "deploy": {
+    "buildCommand": "pip install -r requirements.txt && python -m playwright install chromium",
     "startCommand": "python -m seatalk.callback_server --host 0.0.0.0 --port $PORT --preset ffvn_master_daily --report-timezone Asia/Ho_Chi_Minh",
     "restartPolicyType": "on_failure",
     "restartPolicyMaxRetries": 10
