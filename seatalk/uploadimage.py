@@ -109,11 +109,17 @@ def _guess_extension(response: requests.Response, image_url: str) -> str:
     return suffix if suffix else ".jpg"
 
 
+def _safe_filename_stem(filename_hint: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "-", str(filename_hint or "").strip()).strip("-")
+    return cleaned[:60] or "seatalk-image"
+
+
 def download_seatalk_image(
     *,
     image_url: str,
     app_id: str,
     app_secret: str,
+    filename_hint: str = "",
     output_dir: Path | None = None,
 ) -> Path:
     client = SeaTalkClient(SeaTalkSettings(app_id=app_id, app_secret=app_secret))
@@ -131,7 +137,7 @@ def download_seatalk_image(
     target_dir = output_dir or Path(tempfile.mkdtemp(prefix="seatalk-uploadimage-"))
     target_dir.mkdir(parents=True, exist_ok=True)
     extension = _guess_extension(response, image_url)
-    image_path = target_dir / f"seatalk_image{extension}"
+    image_path = target_dir / f"{_safe_filename_stem(filename_hint)}{extension}"
     image_path.write_bytes(response.content)
     LOGGER.info(
         "Seatalk image download success | image_url=%s | bytes=%s | path=%s",
@@ -263,11 +269,20 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         except PlaywrightTimeoutError:
             LOGGER.warning("Vendor result table did not show a new URL before timeout; falling back to latest visible match.")
 
-        urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+        row_urls: list[str] = []
+        row_locator = page.locator("tr", has_text=image_path.name).first
+        if row_locator.count() > 0:
+            try:
+                row_locator.wait_for(timeout=timeout_ms)
+                row_urls = _extract_public_urls(row_locator.inner_html(), public_url_prefix=public_url_prefix)
+            except PlaywrightTimeoutError:
+                LOGGER.warning("Vendor result row for uploaded file did not appear before timeout | image_path=%s", image_path)
+
+        urls = row_urls or _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
         browser.close()
 
     new_urls = [url for url in urls if url not in existing_urls]
-    final_url = (new_urls or urls or [""])[-1]
+    final_url = (new_urls or urls or [""])[0]
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
         raise UploadImageError("No valid public URL was found after upload.")

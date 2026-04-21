@@ -620,6 +620,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     image_url=str(image_entry.get("image_url") or "").strip(),
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
+                    filename_hint=str(image_entry.get("message_id") or employee_code),
                 )
             except Exception as exc:
                 LOGGER.exception("Seatalk image download failure | employee_code=%s", employee_code)
