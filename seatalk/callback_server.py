@@ -45,6 +45,7 @@ from .uploadimage import (
     mark_image_processed_for_user,
     send_seatalk_text_reply,
     store_latest_image_for_user,
+    summarize_upload_error,
     upload_image_to_vendor_tool,
 )
 
@@ -606,13 +607,13 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
-                    f"*Chi tiết: {exc}*"
+                    f"*Chi tiết: {summarize_upload_error(exc)}*"
                 )
             except Exception as exc:
                 LOGGER.exception("Unexpected vendor upload failure | employee_code=%s", employee_code)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
-                    f"*Chi tiết: {exc}*"
+                    f"*Chi tiết: {summarize_upload_error(exc)}*"
                 )
 
             mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)

@@ -152,6 +152,26 @@ def _extract_public_urls(page_content: str, *, public_url_prefix: str) -> list[s
     return results
 
 
+def summarize_upload_error(exc: Exception) -> str:
+    text = str(exc or "").strip()
+    lowered = text.lower()
+    if "libglib-2.0.so.0" in text or "loading shared libraries" in lowered:
+        return "Runtime Railway đang thiếu Linux libraries cho Chromium."
+    if "executable doesn't exist" in lowered:
+        return "Playwright browser chưa được cài đầy đủ trong Railway runtime."
+    if "website auth failed" in lowered:
+        return "Không đăng nhập được vào Vendor Tool bằng cookie hiện tại."
+    if "no valid public url" in lowered:
+        return "Không tìm thấy link public hợp lệ sau khi bấm Save."
+    if "save button was not clickable" in lowered:
+        return "Không bấm được nút Save trên Vendor Tool."
+    if "upload input not found" in lowered:
+        return "Không tìm thấy ô upload file trên Vendor Tool."
+    if len(text) > 180:
+        return text[:177].rstrip() + "..."
+    return text or "Đã xảy ra lỗi ngoài dự kiến."
+
+
 def upload_image_to_vendor_tool(image_path: Path) -> str:
     upload_url = os.getenv("VENDOR_UPLOAD_TOOL_URL", DEFAULT_VENDOR_UPLOAD_URL).strip() or DEFAULT_VENDOR_UPLOAD_URL
     auth_token = os.getenv("VENDOR_AUTH_TOKEN", "").strip()
@@ -176,7 +196,10 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         ) from exc
 
     with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(headless=headless)
+        try:
+            browser = playwright.chromium.launch(headless=headless)
+        except Exception as exc:
+            raise UploadImageError(summarize_upload_error(exc)) from exc
         context = browser.new_context()
         context.add_cookies(
             [
