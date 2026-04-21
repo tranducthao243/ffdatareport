@@ -216,7 +216,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         page = context.new_page()
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            upload_zone = page.get_by_text("Click or drag file to this area to upload", exact=False)
+            upload_zone = page.locator(".ant-upload-drag-container").first
             upload_zone.wait_for(timeout=timeout_ms)
             LOGGER.info("Vendor upload auth success | url=%s", upload_url)
         except PlaywrightTimeoutError as exc:

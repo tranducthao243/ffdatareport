@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -237,6 +238,10 @@ def sync_store_from_github_artifact(runtime: dict[str, Any]) -> bool:
 
 
 def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
+    private_message_lock = threading.Lock()
+    handled_private_message_ids: dict[str, str] = {}
+    active_uploads: set[str] = set()
+
     class CallbackHandler(BaseHTTPRequestHandler):
         server_version = "SeatalkCallbackServer/1.0"
 
@@ -429,6 +434,17 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             message_text = callback_context["message_text"]
             command = classify_private_command(message_text)
+            message_id = callback_context.get("message_id", "")
+            if command == "uploadimage" and message_id:
+                with private_message_lock:
+                    if message_id in handled_private_message_ids:
+                        LOGGER.info(
+                            "Skipping duplicate private uploadimage callback | employee_code=%s | message_id=%s",
+                            employee_code,
+                            message_id,
+                        )
+                        return
+                    handled_private_message_ids[message_id] = employee_code
             thread_id = callback_context["thread_id"] or callback_context["message_id"]
             private_client = build_seatalk_client(
                 app_id=runtime["seatalk_app_id"],
@@ -578,11 +594,22 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
             LOGGER.info("Seatalk uploadimage command received | employee_code=%s", employee_code)
+            with private_message_lock:
+                if employee_code in active_uploads:
+                    LOGGER.info("Seatalk uploadimage already in progress | employee_code=%s", employee_code)
+                    return (
+                        "**Ảnh gần nhất của bạn đang được xử lý**\n"
+                        "*Vui lòng chờ bot hoàn tất rồi thử lại nếu cần.*"
+                    )
+                active_uploads.add(employee_code)
+
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
                 employee_code=employee_code,
             )
             if not image_entry:
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
                 return (
                     "**Chưa có ảnh nào để tải lên**\n"
                     "*Hãy gửi một ảnh cho bot trước, sau đó gõ `uploadimage`.*"
@@ -596,6 +623,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
             except Exception as exc:
                 LOGGER.exception("Seatalk image download failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
                 return (
                     "**Tải ảnh từ Seatalk thất bại**\n"
                     f"*Chi tiết: {exc}*"
@@ -605,18 +634,24 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 final_url = upload_image_to_vendor_tool(image_path)
             except UploadImageError as exc:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
                     f"*Chi tiết: {summarize_upload_error(exc)}*"
                 )
             except Exception as exc:
                 LOGGER.exception("Unexpected vendor upload failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
                     f"*Chi tiết: {summarize_upload_error(exc)}*"
                 )
 
             mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
+            with private_message_lock:
+                active_uploads.discard(employee_code)
             return (
                 "**Upload ảnh thành công**\n"
                 f"- Link ảnh: {final_url}"
