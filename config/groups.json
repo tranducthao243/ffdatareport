@@ -8,19 +8,11 @@
       "group_id_env": "SEATALK_GROUP_ID"
     },
     {
-      "name": "ffvn_campaign_daily",
+      "name": "ffvn_kol_group",
       "enabled": true,
-      "report_code": "TOPD_REPORT",
-      "title": "Báo cáo campaign FFVN",
+      "report_code": "SO2",
+      "title": "Báo cáo tự động Nhà Sáng Tạo Free Fire",
       "group_id_env": "SEATALK_CAMPAIGN_GROUP_ID",
-      "campaign_names": ["OB53"]
-    },
-    {
-      "name": "ffvn_official_daily",
-      "enabled": true,
-      "report_code": "TOPF_REPORT",
-      "title": "Báo cáo Official Channel FFVN",
-      "group_id_env": "SEATALK_OFFICIAL_GROUP_ID"
     }
   ]
 }
