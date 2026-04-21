@@ -72,7 +72,6 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     if campaign_actions:
         grouped.append(
             {
-                "title": "Mở rộng báo cáo",
                 "description": "Nhấn nút để nhận thêm dữ liệu Campaign hoặc kênh Official qua tin nhắn riêng.",
                 "actions": campaign_actions[:5],
             }
@@ -80,8 +79,7 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     if trend_actions:
         grouped.append(
             {
-                "title": "Theo dõi trend",
-                "description": "Nhấn nút để xem thêm dữ liệu trend nhảy và nội dung Roblox qua tin nhắn riêng.",
+                "description": "Nhấn nút để xem thêm dữ liệu Trend Nhảy và Roblox Content qua tin nhắn riêng.",
                 "actions": trend_actions[:5],
             }
         )
