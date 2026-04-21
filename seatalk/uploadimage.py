@@ -162,20 +162,20 @@ def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
     if "libglib-2.0.so.0" in text or "loading shared libraries" in lowered:
-        return "Runtime Railway đang thiếu Linux libraries cho Chromium."
+        return "Runtime Railway dang thieu Linux libraries cho Chromium."
     if "executable doesn't exist" in lowered:
-        return "Playwright browser chưa được cài đầy đủ trong Railway runtime."
+        return "Playwright browser chua duoc cai day du trong Railway runtime."
     if "website auth failed" in lowered:
-        return "Không đăng nhập được vào Vendor Tool bằng cookie hiện tại."
-    if "no valid public url" in lowered:
-        return "Không tìm thấy link public hợp lệ sau khi bấm Save."
+        return "Khong dang nhap duoc vao Vendor Tool bang cookie hien tai."
+    if "public url" in lowered:
+        return "Khong tim thay link anh public moi sau khi bam Save."
     if "save button was not clickable" in lowered:
-        return "Không bấm được nút Save trên Vendor Tool."
+        return "Khong bam duoc nut Save tren Vendor Tool."
     if "upload input not found" in lowered:
-        return "Không tìm thấy ô upload file trên Vendor Tool."
+        return "Khong tim thay o upload file tren Vendor Tool."
     if len(text) > 180:
         return text[:177].rstrip() + "..."
-    return text or "Đã xảy ra lỗi ngoài dự kiến."
+    return text or "Da xay ra loi ngoai du kien."
 
 
 def upload_image_to_vendor_tool(image_path: Path) -> str:
@@ -189,6 +189,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
     )
     headless = os.getenv("VENDOR_UPLOAD_HEADLESS", "true").strip().lower() not in {"0", "false", "no"}
     timeout_ms = int(os.getenv("VENDOR_UPLOAD_TIMEOUT_MS", "60000").strip() or "60000")
+    result_timeout_ms = int(os.getenv("VENDOR_UPLOAD_RESULT_TIMEOUT_MS", "15000").strip() or "15000")
 
     if not auth_token:
         raise UploadImageError("Missing VENDOR_AUTH_TOKEN.")
@@ -206,6 +207,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser = playwright.chromium.launch(headless=headless)
         except Exception as exc:
             raise UploadImageError(summarize_upload_error(exc)) from exc
+
         context = browser.new_context()
         context.add_cookies(
             [
@@ -220,6 +222,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             ]
         )
         page = context.new_page()
+
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
             upload_zone = page.locator(".ant-upload-drag-container").first
@@ -234,6 +237,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         if file_input.count() <= 0:
             browser.close()
             raise UploadImageError("Upload input not found on vendor tool page.")
+
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
@@ -256,45 +260,49 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Save button was not clickable.") from exc
 
+        LOGGER.info(
+            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s",
+            image_path,
+            result_timeout_ms,
+            len(existing_urls),
+        )
         try:
             page.wait_for_function(
                 """([prefix, seen]) => {
                     const html = document.body.innerHTML || '';
-                    const matches = Array.from(html.matchAll(new RegExp(prefix.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + "[^\\s\\\"'<>]+", 'g'))).map(m => m[0].split('?')[0]);
+                    const regex = new RegExp(prefix.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + "[^\\s\\\"'<>]+", 'g');
+                    const matches = Array.from(html.matchAll(regex)).map(m => m[0].split('?')[0]);
                     return matches.some(url => !seen.includes(url));
                 }""",
                 arg=[public_url_prefix, existing_urls],
-                timeout=timeout_ms,
-            )
-        except PlaywrightTimeoutError:
-            LOGGER.warning("Vendor result table did not show a new URL before timeout; falling back to latest visible match.")
-
-        row_urls: list[str] = []
-        row_locator = page.locator("tbody tr", has_text=image_path.name).last
-        try:
-            row_locator.wait_for(timeout=timeout_ms)
-            row_html = row_locator.inner_html()
-            row_urls = _extract_public_urls(row_html, public_url_prefix=public_url_prefix)
-            LOGGER.info(
-                "Vendor result row matched uploaded file | image_path=%s | urls=%s",
-                image_path,
-                row_urls,
+                timeout=result_timeout_ms,
             )
         except PlaywrightTimeoutError:
             LOGGER.warning(
-                "Vendor result row for uploaded file did not appear before timeout | image_path=%s | filename=%s",
+                "Vendor result URL did not appear before timeout | image_path=%s | timeout_ms=%s",
                 image_path,
-                image_path.name,
+                result_timeout_ms,
             )
 
-        urls = row_urls
+        urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+        new_urls = [url for url in urls if url not in existing_urls]
+        if new_urls:
+            LOGGER.info(
+                "Vendor result new URL candidates found | image_path=%s | urls=%s",
+                image_path,
+                new_urls,
+            )
+        else:
+            LOGGER.warning(
+                "Vendor result page contains no new public URL after save | image_path=%s",
+                image_path,
+            )
         browser.close()
 
-    new_urls = [url for url in urls if url not in existing_urls]
     final_url = (new_urls or [""])[0]
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
-        raise UploadImageError("Không tìm thấy URL mới đúng với file vừa upload trên bảng kết quả.")
+        raise UploadImageError("Da bam Save nhung khong thay link anh public moi xuat hien tren trang ket qua.")
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 
