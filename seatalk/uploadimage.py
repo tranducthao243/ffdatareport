@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import tempfile
 import time
 from datetime import datetime
@@ -20,6 +21,8 @@ LOGGER = logging.getLogger("seatalk.uploadimage")
 DEFAULT_IMAGE_STORE_PATH = Path("outputs/seatalk_private_images.json")
 DEFAULT_VENDOR_UPLOAD_URL = "https://vendors.garena.vn/upload-tool"
 DEFAULT_VENDOR_PUBLIC_URL_PREFIX = "https://files.garena.vn/garena-social/public/"
+DEFAULT_REMOVEBG_SPACE_ID = "amirgame197/Remove-Background"
+DEFAULT_REMOVEBG_API_NAME = "/predict"
 
 
 class UploadImageError(RuntimeError):
@@ -186,6 +189,92 @@ def summarize_upload_error(exc: Exception) -> str:
     if len(text) > 180:
         return text[:177].rstrip() + "..."
     return text or "Da xay ra loi ngoai du kien."
+
+
+def _normalize_result_asset(result: Any) -> str:
+    if isinstance(result, str):
+        return result
+    if isinstance(result, (list, tuple)):
+        for item in result:
+            normalized = _normalize_result_asset(item)
+            if normalized:
+                return normalized
+        return ""
+    if isinstance(result, dict):
+        for key in ("path", "url", "name"):
+            value = str(result.get(key) or "").strip()
+            if value:
+                return value
+        for key in ("image", "data", "value"):
+            value = result.get(key)
+            normalized = _normalize_result_asset(value)
+            if normalized:
+                return normalized
+    return ""
+
+
+def _download_or_copy_result_asset(
+    asset_ref: str,
+    *,
+    filename_hint: str,
+    output_dir: Path | None = None,
+) -> Path:
+    target_dir = output_dir or Path(tempfile.mkdtemp(prefix="seatalk-removebg-"))
+    target_dir.mkdir(parents=True, exist_ok=True)
+    asset_text = str(asset_ref or "").strip()
+    suffix = Path(asset_text).suffix or ".png"
+    target_path = target_dir / f"{_safe_filename_stem(filename_hint)}{suffix}"
+
+    if asset_text.startswith("http://") or asset_text.startswith("https://"):
+        response = requests.get(asset_text, timeout=120)
+        response.raise_for_status()
+        target_path.write_bytes(response.content)
+        return target_path
+
+    source_path = Path(asset_text)
+    if not source_path.exists():
+        raise UploadImageError("Remove background API did not return a usable file.")
+    shutil.copyfile(source_path, target_path)
+    return target_path
+
+
+def remove_background_with_space(image_path: Path) -> Path:
+    space_id = os.getenv("REMOVEBG_SPACE_ID", DEFAULT_REMOVEBG_SPACE_ID).strip() or DEFAULT_REMOVEBG_SPACE_ID
+    api_name = os.getenv("REMOVEBG_API_NAME", DEFAULT_REMOVEBG_API_NAME).strip() or DEFAULT_REMOVEBG_API_NAME
+    hf_token = os.getenv("REMOVEBG_HF_TOKEN", "").strip()
+
+    try:
+        from gradio_client import Client, handle_file
+    except ImportError as exc:
+        raise UploadImageError("gradio_client is not installed in the runtime.") from exc
+
+    try:
+        client_kwargs: dict[str, Any] = {}
+        if hf_token:
+            client_kwargs["hf_token"] = hf_token
+        client = Client(space_id, **client_kwargs)
+        result = client.predict(
+            image=handle_file(str(image_path)),
+            api_name=api_name,
+        )
+    except Exception as exc:
+        raise UploadImageError(f"Remove background API failed: {exc}") from exc
+
+    asset_ref = _normalize_result_asset(result)
+    if not asset_ref:
+        raise UploadImageError("Remove background API did not return an image result.")
+
+    output_path = _download_or_copy_result_asset(
+        asset_ref,
+        filename_hint=f"{image_path.stem}-removebg",
+    )
+    LOGGER.info(
+        "Remove background success | source=%s | output=%s | asset_ref=%s",
+        image_path,
+        output_path,
+        asset_ref,
+    )
+    return output_path
 
 
 def upload_image_to_vendor_tool(image_path: Path) -> str:

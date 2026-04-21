@@ -44,6 +44,7 @@ from .uploadimage import (
     get_image_store_path,
     get_latest_unprocessed_image_for_user,
     mark_image_processed_for_user,
+    remove_background_with_space,
     send_seatalk_text_reply,
     store_latest_image_for_user,
     summarize_upload_error,
@@ -435,13 +436,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             message_text = callback_context["message_text"]
             command = classify_private_command(message_text)
             message_id = callback_context.get("message_id", "")
-            if command == "uploadimage" and message_id:
+            if command in {"uploadimage", "removebg"} and message_id:
                 with private_message_lock:
                     if message_id in handled_private_message_ids:
                         LOGGER.info(
-                            "Skipping duplicate private uploadimage callback | employee_code=%s | message_id=%s",
+                            "Skipping duplicate private image command callback | employee_code=%s | message_id=%s | command=%s",
                             employee_code,
                             message_id,
+                            command,
                         )
                         return
                     handled_private_message_ids[message_id] = employee_code
@@ -513,7 +515,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = format_hashtag_report(runtime["db_path"], message_text)
             elif command == "uploadimage":
                 reply_text = self._handle_uploadimage_command(callback_context)
-            elif command in {"shortlink", "enhanceimage", "removebg"}:
+            elif command == "removebg":
+                reply_text = self._handle_removebg_command(callback_context)
+            elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
                 reply_text = (
@@ -656,6 +660,64 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             return (
                 "**Upload ảnh thành công**\n"
                 f"- Link ảnh: {final_url}"
+            )
+
+        def _handle_removebg_command(self, callback_context: dict[str, str]) -> str:
+            employee_code = callback_context["employee_code"]
+            LOGGER.info("Seatalk removebg command received | employee_code=%s", employee_code)
+            with private_message_lock:
+                if employee_code in active_uploads:
+                    LOGGER.info("Seatalk removebg already in progress | employee_code=%s", employee_code)
+                    return (
+                        "**áº¢nh gáº§n nháº¥t cá»§a báº¡n Ä‘ang Ä‘Æ°á»£c xá»­ lÃ½**\n"
+                        "*Vui lÃ²ng chá» bot hoÃ n táº¥t rá»“i thá»­ láº¡i náº¿u cáº§n.*"
+                    )
+                active_uploads.add(employee_code)
+
+            image_entry = get_latest_unprocessed_image_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+            )
+            if not image_entry:
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
+                return (
+                    "**ChÆ°a cÃ³ áº£nh nÃ o Ä‘á»ƒ tÃ¡ch ná»n**\n"
+                    "*HÃ£y gá»­i má»™t áº£nh cho bot trÆ°á»›c, sau Ä‘Ã³ gÃµ `removebg`.*"
+                )
+
+            try:
+                image_path = download_seatalk_image(
+                    image_url=str(image_entry.get("image_url") or "").strip(),
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    filename_hint=str(image_entry.get("message_id") or employee_code),
+                )
+                output_path = remove_background_with_space(image_path)
+                final_url = upload_image_to_vendor_tool(output_path)
+            except UploadImageError as exc:
+                LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
+                return (
+                    "**TÃ¡ch ná»n áº£nh tháº¥t báº¡i**\n"
+                    f"*Chi tiáº¿t: {summarize_upload_error(exc)}*"
+                )
+            except Exception as exc:
+                LOGGER.exception("Unexpected remove background failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(employee_code)
+                return (
+                    "**TÃ¡ch ná»n áº£nh tháº¥t báº¡i**\n"
+                    f"*Chi tiáº¿t: {summarize_upload_error(exc)}*"
+                )
+
+            mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
+            with private_message_lock:
+                active_uploads.discard(employee_code)
+            return (
+                "**Táº¡o áº£nh tÃ¡ch ná»n thÃ nh cÃ´ng**\n"
+                f"- Link áº£nh: {final_url}"
             )
 
         def _build_report_text(self, report_code: str) -> str:
