@@ -270,22 +270,31 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             LOGGER.warning("Vendor result table did not show a new URL before timeout; falling back to latest visible match.")
 
         row_urls: list[str] = []
-        row_locator = page.locator("tr", has_text=image_path.name).first
-        if row_locator.count() > 0:
-            try:
-                row_locator.wait_for(timeout=timeout_ms)
-                row_urls = _extract_public_urls(row_locator.inner_html(), public_url_prefix=public_url_prefix)
-            except PlaywrightTimeoutError:
-                LOGGER.warning("Vendor result row for uploaded file did not appear before timeout | image_path=%s", image_path)
+        row_locator = page.locator("tbody tr", has_text=image_path.name).last
+        try:
+            row_locator.wait_for(timeout=timeout_ms)
+            row_html = row_locator.inner_html()
+            row_urls = _extract_public_urls(row_html, public_url_prefix=public_url_prefix)
+            LOGGER.info(
+                "Vendor result row matched uploaded file | image_path=%s | urls=%s",
+                image_path,
+                row_urls,
+            )
+        except PlaywrightTimeoutError:
+            LOGGER.warning(
+                "Vendor result row for uploaded file did not appear before timeout | image_path=%s | filename=%s",
+                image_path,
+                image_path.name,
+            )
 
-        urls = row_urls or _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+        urls = row_urls
         browser.close()
 
     new_urls = [url for url in urls if url not in existing_urls]
-    final_url = (new_urls or urls or [""])[0]
+    final_url = (new_urls or [""])[0]
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
-        raise UploadImageError("No valid public URL was found after upload.")
+        raise UploadImageError("Không tìm thấy URL mới đúng với file vừa upload trên bảng kết quả.")
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 
