@@ -68,6 +68,15 @@ def build_configured_reports(
         timezone_name=timezone_name,
         now=now,
     )
+    payload = {
+        "packages": packages,
+        "validation": {
+            "warnings": validation["warnings"],
+        },
+    }
+    payload = apply_history_deltas(payload, history_dir=history_dir, now=now)
+    packages = payload["packages"]
+
     group_lookup = {item["name"]: item for item in groups_config["groups"]}
     for package in packages:
         group = group_lookup[package["groupName"]]
@@ -78,12 +87,7 @@ def build_configured_reports(
         package["sectionCount"] = len(package["sections"])
 
     health_snapshot = build_health_snapshot(
-        {
-            "packages": packages,
-            "validation": {
-                "warnings": validation["warnings"],
-            },
-        },
+        payload,
         db_path=db_path,
         source_scope=source_scope,
         campaigns_config=campaigns_config,
@@ -176,7 +180,6 @@ def build_configured_reports(
         "packages": packages,
         "sendResults": send_results,
     }
-    payload = apply_history_deltas(payload, history_dir=history_dir, now=now)
     if history_path:
         save_daily_snapshot(build_daily_snapshot(payload, now=now), history_path)
     return payload
@@ -218,7 +221,16 @@ def build_report_package_by_code(
             selected_group = group
             break
     if selected_group is None:
-        raise DatasocialError(f"No enabled group is configured for report_code '{report_code}'.")
+        report_def = reports_config.get("reports", {}).get(report_code)
+        if not isinstance(report_def, dict):
+            raise DatasocialError(f"No enabled group is configured for report_code '{report_code}'.")
+        selected_group = {
+            "name": f"adhoc_{report_code.lower()}",
+            "enabled": True,
+            "report_code": report_code,
+            "title": report_def.get("title") or report_code,
+            "group_id": "",
+        }
 
     packages = build_report_packages(
         db_path,

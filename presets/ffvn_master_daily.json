@@ -10,7 +10,7 @@
   "fetch_window": "30D",
   "report_mode": "today_so_far",
   "report_timezone": "Asia/Ho_Chi_Minh",
-  "category_ids": [13, 14, 22, 23, 24],
+  "category_ids": [13, 14, 22, 23, 24, 119, 368],
   "platform_ids": [0, 1, 2],
   "metric_ids": [2, 61, 0, 1, 4],
   "metric_duration": 30,

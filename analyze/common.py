@@ -13,6 +13,9 @@ from datasocial.timewindows import DEFAULT_REPORT_TZ, build_date_window, get_rep
 KOL_WHITELIST = {"freefire", "nhasangtaofreefire", "ff", "garena"}
 KOL_PLATFORMS = ("tiktok", "youtube")
 OFFICIAL_PLATFORMS = ("tiktok", "youtube", "facebook")
+KOL_CATEGORY_IDS = {14, 22, 23, 24}
+TREND_DANCE_CATEGORY_IDS = {119}
+ROBLOX_CATEGORY_IDS = {368}
 
 
 @dataclass(slots=True)
@@ -136,6 +139,7 @@ def filter_posts(
     start_date: date,
     end_date: date,
     platforms: tuple[str, ...] | None = None,
+    category_ids: set[int] | None = None,
     require_kol: bool = False,
     require_official: bool = False,
     hashtag_whitelist: set[str] | None = None,
@@ -145,6 +149,8 @@ def filter_posts(
         if post.published_date < start_date or post.published_date > end_date:
             continue
         if platforms and post.platform not in platforms:
+            continue
+        if category_ids is not None and post.category_id not in category_ids:
             continue
         if require_kol and not post.is_kol:
             continue
@@ -201,6 +207,34 @@ def summarize_channels(posts: Iterable[StorePost], *, limit: int) -> list[dict[s
         key=lambda item: (item["totalView"], item["totalClips"]),
         reverse=True,
     )[:limit]
+
+
+def summarize_channels_by_platform(posts: Iterable[StorePost], *, limit: int, platforms: tuple[str, ...]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        platform: summarize_channels((post for post in posts if post.platform == platform), limit=limit)
+        for platform in platforms
+    }
+
+
+def rank_posts_limited_per_channel(
+    posts: Iterable[StorePost],
+    *,
+    limit: int,
+    per_channel_limit: int,
+) -> list[dict[str, Any]]:
+    ranked = sorted(posts, key=lambda post: (post.view, post.engagement), reverse=True)
+    selected: list[dict[str, Any]] = []
+    channel_counts: dict[tuple[str, str], int] = {}
+    for post in ranked:
+        key = (post.platform, post.channel_id)
+        current = channel_counts.get(key, 0)
+        if current >= per_channel_limit:
+            continue
+        channel_counts[key] = current + 1
+        selected.append(serialize_post(post))
+        if len(selected) >= limit:
+            break
+    return selected
 
 
 def daily_totals(posts: Iterable[StorePost]) -> list[dict[str, Any]]:

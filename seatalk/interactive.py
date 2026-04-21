@@ -9,9 +9,6 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
     if report_code != "SO1":
         return []
 
-    group_name = str(package.get("groupName") or "").strip()
-    generated_at = str(package.get("generatedAt") or "").strip()
-
     return [
         {
             "label": "Xem campaign",
@@ -22,9 +19,6 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "action": "open_report",
                     "target_report_code": "TOPD_REPORT",
-                    "source_report_code": report_code,
-                    "group_name": group_name,
-                    "generated_at": generated_at,
                 }
             ),
         },
@@ -37,33 +31,30 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
                 {
                     "action": "open_report",
                     "target_report_code": "TOPF_REPORT",
-                    "source_report_code": report_code,
-                    "group_name": group_name,
-                    "generated_at": generated_at,
                 }
             ),
         },
         {
             "label": "Trend nhảy",
-            "actionType": "reply_text",
-            "targetReportCode": "TREND_DANCE_REPORT",
+            "actionType": "open_report",
+            "targetReportCode": "TOPG_REPORT",
             "actionGroup": "trend",
             "callbackPayload": encode_callback_payload(
                 {
-                    "action": "reply_text",
-                    "target_report_code": "TREND_DANCE_REPORT",
+                    "action": "open_report",
+                    "target_report_code": "TOPG_REPORT",
                 }
             ),
         },
         {
-            "label": "Trend tình huống",
-            "actionType": "reply_text",
-            "targetReportCode": "TREND_SITUATION_REPORT",
+            "label": "Roblox Content",
+            "actionType": "open_report",
+            "targetReportCode": "TOPH_REPORT",
             "actionGroup": "trend",
             "callbackPayload": encode_callback_payload(
                 {
-                    "action": "reply_text",
-                    "target_report_code": "TREND_SITUATION_REPORT",
+                    "action": "open_report",
+                    "target_report_code": "TOPH_REPORT",
                 }
             ),
         },
@@ -90,7 +81,7 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
         grouped.append(
             {
                 "title": "Theo dõi trend",
-                "description": "Nhấn nút để xem thêm dữ liệu trend nhảy và trend tình huống qua tin nhắn riêng.",
+                "description": "Nhấn nút để xem thêm dữ liệu trend nhảy và nội dung Roblox qua tin nhắn riêng.",
                 "actions": trend_actions[:5],
             }
         )

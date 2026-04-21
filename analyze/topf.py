@@ -7,7 +7,7 @@ from .common import OFFICIAL_PLATFORMS, build_anchor_window, build_days_window, 
 
 
 VIDEO_LIKE_TYPES = {"video", "reel", "live"}
-PHOTO_ENGAGEMENT_TYPES = {"photo", "album"}
+PHOTO_ENGAGEMENT_TYPES = {"text", "photo", "link", "album"}
 
 
 def analyze_topf(
@@ -41,6 +41,11 @@ def analyze_topf(
         key=lambda post: (post.reaction, post.engagement, post.published_at),
         reverse=True,
     )[:3]
+    fanpage_posts_3d = [
+        post
+        for post in top_posts
+        if post.platform == "facebook"
+    ]
     weekly_posts = filter_posts(
         posts,
         start_date=seven_start,
@@ -66,5 +71,6 @@ def analyze_topf(
         "summaryWindow": {"from": seven_start.isoformat(), "to": seven_end.isoformat()},
         "topVideos": rank_posts(top_video_posts, limit=limit),
         "topPhotoEngagement": [serialize_post(post) for post in top_photo_ranked],
+        "totalFanpagePosts3D": len(fanpage_posts_3d),
         "platformTotals": totals_by_platform,
     }

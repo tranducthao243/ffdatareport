@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import KOL_PLATFORMS, build_anchor_window, filter_posts, load_posts, summarize_channels
+from .common import KOL_CATEGORY_IDS, KOL_PLATFORMS, build_anchor_window, filter_posts, load_posts, summarize_channels
 
 
 def analyze_topc(
@@ -21,6 +21,7 @@ def analyze_topc(
         start_date=start_date,
         end_date=end_date,
         platforms=KOL_PLATFORMS,
+        category_ids=KOL_CATEGORY_IDS,
         require_kol=True,
     )
     return {

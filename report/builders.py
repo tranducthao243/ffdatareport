@@ -4,7 +4,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from analyze import analyze_topa, analyze_topb, analyze_topc, analyze_topd, analyze_tope, analyze_topf
+from analyze import analyze_topa, analyze_topb, analyze_topc, analyze_topd, analyze_tope, analyze_topf, analyze_topg, analyze_toph
 
 
 def build_report_packages(
@@ -77,6 +77,10 @@ def run_analyzer(
         return analyze_tope(db_path, mode=mode, timezone_name=timezone_name, now=now)
     if analyzer_code == "TOPF":
         return analyze_topf(db_path, mode=mode, timezone_name=timezone_name, now=now)
+    if analyzer_code == "TOPG":
+        return analyze_topg(db_path, mode=mode, timezone_name=timezone_name, now=now)
+    if analyzer_code == "TOPH":
+        return analyze_toph(db_path, mode=mode, timezone_name=timezone_name, now=now)
     if analyzer_code == "TOPD":
         campaign_names = group.get("campaign_names") or []
         return {

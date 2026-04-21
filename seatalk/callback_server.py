@@ -41,17 +41,6 @@ from .callbacks import (
 LOGGER = logging.getLogger("seatalk.callback_server")
 
 
-TREND_PLACEHOLDER_MESSAGES = {
-    "TREND_DANCE_REPORT": (
-        "**Trend nhảy**\n"
-        "*Dữ liệu trend nhảy đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.*"
-    ),
-    "TREND_SITUATION_REPORT": (
-        "**Trend tình huống**\n"
-        "*Dữ liệu trend tình huống đang được cập nhật. Tôi sẽ mở nút này ngay khi category data sẵn sàng.*"
-    ),
-}
-
 PRIVATE_FUTURE_FEATURE_MESSAGE = (
     "**Đang check và sẽ cập nhật tính năng sau**\n"
     "*Tính năng này đã được ghi nhận trong roadmap của bot.*"
@@ -445,9 +434,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     thread_id or "-",
                 )
 
-            if command == "refresh" and runtime["sync_on_click"]:
-                sync_store_from_github_artifact(runtime)
-
             campaigns_config = load_json(runtime["campaigns_config"])
             reports_payload = self._build_reports_payload()
             health_snapshot = build_health_snapshot(
@@ -465,13 +451,17 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = self._build_report_text("TOPD_REPORT")
             elif command == "official":
                 reply_text = self._build_report_text("TOPF_REPORT")
-            elif command == "data" or command == "refresh":
+            elif command == "dance":
+                reply_text = self._build_report_text("TOPG_REPORT")
+            elif command == "roblox":
+                reply_text = self._build_report_text("TOPH_REPORT")
+            elif command == "data":
                 reply_text = format_data_report(health_snapshot)
             elif command == "scope":
                 reply_text = format_scope_report(health_snapshot)
             elif command == "health":
                 reply_text = format_health_report(health_snapshot)
-            elif command == "webcompany":
+            elif command == "web":
                 links_payload = load_json(Path("config/webcompany_links.json"))
                 lines = ["**Link web quan trọng của team**"]
                 sections = links_payload.get("sections") or []
@@ -498,12 +488,15 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `health`: tổng quan tình trạng dữ liệu\n"
                     "- `data`: kho dữ liệu đang dùng\n"
                     "- `scope`: source scope hiện tại\n"
+                    "\n"
+                    "**Tiện ích**\n"
+                    "- `web`: liệt kê các link web quan trọng của team\n"
+                    "\n"
+                    "**Dữ liệu KOLs**\n"
                     "- `campaign`: báo cáo campaign hiện tại\n"
                     "- `official`: báo cáo kênh Official\n"
-                    "- `refresh`: đồng bộ artifact mới nhất rồi trả lại thông tin dữ liệu\n"
-                    "\n"
-                    "**Dữ liệu và tiện ích**\n"
-                    "- `webcompany`: liệt kê các link web quan trọng của team\n"
+                    "- `dance`: báo cáo gói TOPG\n"
+                    "- `roblox`: báo cáo gói TOPH\n"
                     "\n"
                     "**Tính năng sắp cập nhật**\n"
                     "- `shortlink`: tạo shortlink từ link và config\n"
@@ -512,7 +505,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `removebg`: tách nền ảnh và trả lại ảnh\n"
                     "\n"
                     "**Hướng dẫn**\n"
-                    "- `help`: hiện menu này\n"
+                    "- `help`: xem menu này và cách dùng bot\n"
                 )
             else:
                 reply_text = answer_data_question(

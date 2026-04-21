@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import KOL_PLATFORMS, average, build_days_window, filter_posts, load_posts, percentage, rank_posts
+from .common import KOL_CATEGORY_IDS, KOL_PLATFORMS, average, build_days_window, filter_posts, load_posts, percentage, rank_posts
 
 
 def analyze_topd(
@@ -28,6 +28,7 @@ def analyze_topd(
         start_date=current_start,
         end_date=current_end,
         platforms=KOL_PLATFORMS,
+        category_ids=KOL_CATEGORY_IDS,
         require_kol=True,
         hashtag_whitelist=tags,
     )
@@ -64,6 +65,7 @@ def analyze_topd(
         start_date=kol_start,
         end_date=kol_end,
         platforms=KOL_PLATFORMS,
+        category_ids=KOL_CATEGORY_IDS,
         require_kol=True,
     )
     non_participant_channels: dict[tuple[str, str, str], dict[str, object]] = {}

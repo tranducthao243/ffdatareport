@@ -23,6 +23,10 @@ def render_seatalk_package(package: dict[str, Any]) -> str:
             lines.extend(render_topd(section))
         elif code == "TOPF":
             lines.extend(render_topf(section))
+        elif code == "TOPG":
+            lines.extend(render_topg(section))
+        elif code == "TOPH":
+            lines.extend(render_toph(section))
         lines.append("")
     return "\n".join(line for line in lines if line is not None).strip()
 
@@ -59,7 +63,18 @@ def render_tope(section: dict[str, Any]) -> list[str]:
         f"- Tổng view: {compact_number(section['totalViews'])}",
         f"- Tổng clip: {section['totalClips']}",
     ]
-    lines.extend(render_history_compare(section.get("historyCompare")))
+    history_compare = section.get("historyCompare") or {}
+    daily = list(section.get("daily") or [])
+    if len(daily) >= 2:
+        today_views = int(daily[-1].get("totalView", 0) or 0)
+        yesterday_views = int(daily[-2].get("totalView", 0) or 0)
+        lines.append(f"- View hôm nay so với hôm trước: {format_delta(today_views - yesterday_views)}")
+    if history_compare.get("vsPreviousWeek"):
+        lines.append(
+            "- View tuần này so với tuần trước: "
+            f"{format_delta(int(history_compare['vsPreviousWeek']['views']['change']))}"
+        )
+    lines.extend(render_history_compare(history_compare, include_clips=False))
     return lines
 
 
@@ -79,10 +94,10 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                 f"  Mục tiêu KPI: {campaign['kpiPercent']}% / {compact_number(campaign['kpiTarget'])}",
                 f"  Khả năng đạt KPI: {campaign.get('forecastKpiText', '-')}",
                 f"  Số ngày còn lại: {campaign['daysLeft']}",
+                f"  So sánh view với hôm trước: {format_history_view_change(campaign.get('historyCompare'), 'vsPreviousDay')}",
                 "  *Video TikTok nổi bật trong 3 ngày gần đây:*",
             ]
         )
-        lines.extend([f"  {line}" for line in render_history_compare(campaign.get("historyCompare"))])
         if campaign.get("coverageWarning"):
             lines.append(f"  *Lưu ý: {campaign['coverageWarning']}*")
         if campaign.get("topRecentTikTok"):
@@ -123,12 +138,47 @@ def render_topf(section: dict[str, Any]) -> list[str]:
     else:
         lines.append("- Chưa có dữ liệu.")
     lines.append("")
+    lines.append(f"- Tổng số bài viết trên fanpage 3 ngày qua: {section.get('totalFanpagePosts3D', 0)}")
+    lines.append("")
     lines.append(f"*Tổng hợp 7 ngày: `{section['summaryWindow']['from']} -> {section['summaryWindow']['to']}`*")
     for platform, totals in section.get("platformTotals", {}).items():
         lines.append(
             f"- {platform.title()}: {compact_number(totals['totalViews'])} view | {totals['totalClips']} clip"
         )
     lines.extend(render_history_compare(section.get("historyCompare")))
+    return lines
+
+
+def render_topg(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "**Trend nhảy**",
+        f"*Top 10 video nhiều view nhất tuần: `{section['weekWindow']['from']} -> {section['weekWindow']['to']}`*",
+    ]
+    lines.extend(render_ranked_posts(section.get("topWeeklyVideos", [])))
+    lines.append("")
+    lines.append(f"*Top 10 video nhiều view nhất tháng qua: `{section['monthWindow']['from']} -> {section['monthWindow']['to']}`*")
+    lines.extend(render_ranked_posts(section.get("topMonthlyVideos", [])))
+    lines.append("")
+    lines.append(f"*Top 10 kênh có tổng view nhiều nhất 30 ngày qua: `{section['monthWindow']['from']} -> {section['monthWindow']['to']}`*")
+    channel_lines = render_ranked_channels(section.get("topMonthlyChannels", []))
+    lines.extend(channel_lines)
+    return lines
+
+
+def render_toph(section: dict[str, Any]) -> list[str]:
+    lines = [
+        "**Roblox Content**",
+        f"*Top 10 video nhiều view nhất tuần: `{section['window']['from']} -> {section['window']['to']}`*",
+    ]
+    for platform in ("tiktok", "youtube"):
+        lines.append("")
+        lines.append(f"*{platform.title()}*")
+        lines.extend(render_ranked_posts(section.get("topVideosByPlatform", {}).get(platform, [])))
+    lines.append("")
+    lines.append(f"*Top 5 kênh có tổng view nhiều nhất 7 ngày qua: `{section['window']['from']} -> {section['window']['to']}`*")
+    for platform in ("tiktok", "youtube"):
+        lines.append(f"- {platform.title()}:")
+        lines.extend(render_ranked_channels(section.get("topChannelsByPlatform", {}).get(platform, []), indent="  "))
     return lines
 
 
@@ -139,6 +189,17 @@ def render_ranked_posts(items: list[dict[str, Any]]) -> list[str]:
     for index, item in enumerate(items, start=1):
         lines.append(f"{index}. {item['channelName']} | {compact_number(item['view'])} view")
         lines.append(f"   {item['url']}")
+    return lines
+
+
+def render_ranked_channels(items: list[dict[str, Any]], *, indent: str = "") -> list[str]:
+    if not items:
+        return [f"{indent}- Chưa có dữ liệu."]
+    lines: list[str] = []
+    for index, item in enumerate(items, start=1):
+        lines.append(
+            f"{indent}{index}. {item['channelName']} | {compact_number(item['totalView'])} view | {item['totalClips']} clip"
+        )
     return lines
 
 
@@ -159,14 +220,26 @@ def format_delta(change: int) -> str:
     return "Không đổi"
 
 
-def render_history_compare(history_compare: dict[str, Any] | None) -> list[str]:
+def render_history_compare(history_compare: dict[str, Any] | None, *, include_clips: bool = True) -> list[str]:
     if not history_compare:
         return []
     lines: list[str] = []
     if "vsPreviousDay" in history_compare:
         current = history_compare["vsPreviousDay"]
-        lines.append(f"- So với hôm qua: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+        line = f"- So với hôm qua: view {format_delta(int(current['views']['change']))}"
+        if include_clips:
+            line += f" | clip {format_delta(int(current['clips']['change']))}"
+        lines.append(line)
     if "vsPreviousWeek" in history_compare:
         current = history_compare["vsPreviousWeek"]
-        lines.append(f"- So với tuần trước: view {format_delta(int(current['views']['change']))} | clip {format_delta(int(current['clips']['change']))}")
+        line = f"- So với tuần trước: view {format_delta(int(current['views']['change']))}"
+        if include_clips:
+            line += f" | clip {format_delta(int(current['clips']['change']))}"
+        lines.append(line)
     return lines
+
+
+def format_history_view_change(history_compare: dict[str, Any] | None, key: str) -> str:
+    if not history_compare or key not in history_compare:
+        return "Chưa có dữ liệu so sánh"
+    return format_delta(int(history_compare[key]["views"]["change"]))

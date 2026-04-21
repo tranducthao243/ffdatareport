@@ -8,7 +8,7 @@ from typing import Any
 from datasocial.exceptions import DatasocialError
 
 
-VALID_ANALYZER_CODES = {"TOPA", "TOPB", "TOPC", "TOPD", "TOPE", "TOPF"}
+VALID_ANALYZER_CODES = {"TOPA", "TOPB", "TOPC", "TOPD", "TOPE", "TOPF", "TOPG", "TOPH"}
 
 
 def load_json(path: Path) -> Any:

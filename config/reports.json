@@ -15,6 +15,14 @@
     "TOPF_REPORT": {
       "title": "TOPF - Báo cáo Official",
       "sections": ["TOPF"]
+    },
+    "TOPG_REPORT": {
+      "title": "TOPG - Báo cáo Trend Nhảy",
+      "sections": ["TOPG"]
+    },
+    "TOPH_REPORT": {
+      "title": "TOPH - Báo cáo Roblox Content",
+      "sections": ["TOPH"]
     }
   }
 }

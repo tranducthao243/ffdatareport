@@ -14,6 +14,8 @@ CATEGORY_LABELS = {
     22: "Entertainment Creator",
     23: "Esports Creator",
     24: "Community Creator",
+    119: "Trend nhảy",
+    368: "Roblox Content",
 }
 
 PLATFORM_LABELS = {
@@ -66,10 +68,12 @@ def classify_private_command(text: str) -> str:
         return "campaign"
     if normalized in {"official", "topf", "kenh official"}:
         return "official"
-    if normalized in {"refresh", "sync", "lam moi", "dong bo"}:
-        return "refresh"
+    if normalized in {"dance", "trend nhay", "topg"}:
+        return "dance"
+    if normalized in {"roblox", "roblox content", "toph"}:
+        return "roblox"
     if normalized in {"webcompany", "web", "link", "links"}:
-        return "webcompany"
+        return "web"
     if normalized in {"shortlink", "link ngan", "tao shortlink", "rut gon link"}:
         return "shortlink"
     if normalized in {"uploadimage", "upload anh", "gui anh len web", "up anh"}:
@@ -139,6 +143,8 @@ def build_health_snapshot(
                 }
             )
 
+    comparisons: dict[str, Any] = {}
+
     for package in payload.get("packages", []):
         for section in package.get("sections", []):
             code = str(section.get("code") or "").strip()
@@ -163,7 +169,7 @@ def build_health_snapshot(
                                 "severity": "critical",
                                 "code": "campaign_missing_data",
                                 "message": (
-                                    f"Campaign {campaign.get('campaignName', '-')} dang khong co clip nao "
+                                    f"Campaign {campaign.get('campaignName', '-')} đang không có clip nào "
                                     "trong cửa sổ theo dõi hiện tại."
                                 ),
                             }
@@ -180,6 +186,8 @@ def build_health_snapshot(
                             }
                         )
             elif code == "TOPE":
+                if section.get("historyCompare"):
+                    comparisons["kolOverview"] = section["historyCompare"]
                 daily = list(section.get("daily") or [])
                 if len(daily) >= 2:
                     previous = int(daily[-2].get("totalClips", 0))
@@ -218,6 +226,7 @@ def build_health_snapshot(
             for item in active_campaigns
         ],
         "issues": deduped,
+        "comparisons": comparisons,
         "blockSend": any(item["severity"] == "critical" for item in deduped),
     }
 
@@ -237,6 +246,17 @@ def format_health_report(snapshot: dict[str, Any]) -> str:
         lines.append(f"- Campaign đang active: {names}")
     else:
         lines.append("- Campaign đang active: không có")
+    kol_compare = (snapshot.get("comparisons") or {}).get("kolOverview") or {}
+    if kol_compare.get("vsPreviousDay"):
+        lines.append(
+            "- Tổng view hệ KOL so với hôm qua: "
+            f"{format_change(int(kol_compare['vsPreviousDay']['views']['change']))}"
+        )
+    if kol_compare.get("vsPreviousWeek"):
+        lines.append(
+            "- Tổng view hệ KOL so với tuần trước: "
+            f"{format_change(int(kol_compare['vsPreviousWeek']['views']['change']))}"
+        )
     lines.append("")
     lines.append("**Cảnh báo hiện tại**")
     issues = snapshot.get("issues") or []
@@ -255,10 +275,17 @@ def format_data_report(snapshot: dict[str, Any]) -> str:
     lines = [
         "**Dữ liệu đang dùng**",
         f"*SQLite: `{store['dbPath']}`*",
+        f"- Khung dữ liệu đang quét: `{store.get('minPublishedDate', '-')} -> {store.get('maxPublishedDate', '-')}`",
+        f"- Cập nhật lần cuối: `{store.get('lastInsertedAt', '-')}`",
         f"- Bài viết: {store['postCount']}",
         f"- Kênh: {store['channelCount']}",
         f"- Tổng view: {compact_number(store['totalView'])}",
     ]
+    active_campaigns = snapshot.get("activeCampaigns") or []
+    if active_campaigns:
+        lines.append("- Campaign đang active: " + ", ".join(item["name"] for item in active_campaigns))
+    else:
+        lines.append("- Campaign đang active: không có")
     if platform_counts:
         lines.append("- Phân bố theo nền tảng:")
         for platform, count in platform_counts.items():
@@ -338,3 +365,11 @@ def format_health_alert(snapshot: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines).strip()
+
+
+def format_change(change: int) -> str:
+    if change > 0:
+        return f"Tăng {compact_number(change)}"
+    if change < 0:
+        return f"Giảm {compact_number(abs(change))}"
+    return "Không đổi"

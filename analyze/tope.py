@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import KOL_PLATFORMS, build_anchor_window, daily_totals, filter_posts, load_posts
+from .common import KOL_CATEGORY_IDS, KOL_PLATFORMS, build_anchor_window, daily_totals, filter_posts, load_posts
 
 
 def analyze_tope(
@@ -20,6 +20,7 @@ def analyze_tope(
         start_date=start_date,
         end_date=end_date,
         platforms=KOL_PLATFORMS,
+        category_ids=KOL_CATEGORY_IDS,
         require_kol=True,
     )
     return {

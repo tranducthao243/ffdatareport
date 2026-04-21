@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import KOL_PLATFORMS, KOL_WHITELIST, build_days_window, filter_posts, load_posts, rank_posts
+from .common import KOL_CATEGORY_IDS, KOL_PLATFORMS, KOL_WHITELIST, build_days_window, filter_posts, load_posts, rank_posts
 
 
 def analyze_topa(
@@ -21,6 +21,7 @@ def analyze_topa(
         start_date=start_date,
         end_date=end_date,
         platforms=KOL_PLATFORMS,
+        category_ids=KOL_CATEGORY_IDS,
         require_kol=True,
         hashtag_whitelist=KOL_WHITELIST,
     )
