@@ -348,34 +348,34 @@ def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | b
 
 def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: Path) -> None:
     checkbox = page.locator("input#basic_isSensitive").first
+    label = page.locator(
+        "#basic > div.ant-form-item.css-jycdem.ant-form-item-has-success > div > div > div > div > label"
+    ).first
     if checkbox.count() <= 0:
         _log_flow_step("vendor_upload", "sensitive_checkbox_before", "warn", found=False)
         _log_flow_step("vendor_upload", "sensitive_checkbox_after", "warn", found=False)
         LOGGER.warning("Vendor sensitive checkbox not found | image_path=%s", image_path)
         return
 
+    # Ant Design upload form updates asynchronously after selecting a file.
+    page.wait_for_timeout(250)
     before_checked = checkbox.is_checked()
     _log_flow_step("vendor_upload", "sensitive_checkbox_before", "ok", checked=before_checked)
     LOGGER.info("Vendor sensitive checkbox before save | image_path=%s | checked=%s", image_path, before_checked)
     if before_checked:
-        toggled = False
-        try:
-            checkbox.uncheck(timeout=timeout_ms)
-            toggled = True
-        except Exception:
-            LOGGER.warning("Vendor checkbox.uncheck failed, trying click fallback | image_path=%s", image_path)
-        if not toggled:
-            try:
-                checkbox.click(timeout=timeout_ms)
-                toggled = True
-            except Exception:
-                LOGGER.warning("Vendor checkbox.click failed, trying label click fallback | image_path=%s", image_path)
-        if not toggled:
-            label = page.locator("label[for='basic_isSensitive']").first
-            if label.count() > 0:
-                label.click(timeout=timeout_ms)
-                toggled = True
-        page.wait_for_timeout(200)
+        if label.count() <= 0:
+            raise UploadImageError("Khong tim thay label checkbox du lieu nhay cam tren Vendor Tool.")
+        for attempt in (1, 2):
+            _log_flow_step("vendor_upload", "sensitive_checkbox_click_label", "ok", attempt=attempt)
+            label.click(timeout=timeout_ms)
+            page.wait_for_timeout(250)
+            if not checkbox.is_checked():
+                break
+            LOGGER.warning(
+                "Vendor sensitive checkbox still checked after label click | image_path=%s | attempt=%s",
+                image_path,
+                attempt,
+            )
     after_checked = checkbox.is_checked()
     _log_flow_step("vendor_upload", "sensitive_checkbox_after", "ok" if not after_checked else "fail", checked=after_checked)
     LOGGER.info("Vendor sensitive checkbox after save prep | image_path=%s | checked=%s", image_path, after_checked)
