@@ -429,6 +429,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
                 app_id="app",
                 app_secret="secret",
                 employee_code="e_123",
+                thread_id="thread-1",
+                quoted_message_id="message-1",
             )
         )
         client.token = "token"
@@ -441,6 +443,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         _, kwargs = client.session.post.call_args
         self.assertEqual(kwargs["json"]["message"]["tag"], "image")
+        self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
+        self.assertEqual(kwargs["json"]["quoted_message_id"], "message-1")
         content = kwargs["json"]["message"]["image_base64"]["content"]
         self.assertEqual(base64.b64decode(content.encode("ascii")), b"png-bytes")
 

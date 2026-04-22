@@ -32,6 +32,18 @@ class UploadImageError(RuntimeError):
     """Raised when the uploadimage command cannot complete."""
 
 
+def _log_flow_step(flow: str, step: str, status: str, **details: Any) -> None:
+    detail_parts = [f"{key}={value}" for key, value in details.items() if value not in (None, "")]
+    suffix = f" | {' | '.join(detail_parts)}" if detail_parts else ""
+    message = f"{flow} step | step={step} | status={status}{suffix}"
+    if status == "fail":
+        LOGGER.error(message)
+    elif status == "warn":
+        LOGGER.warning(message)
+    else:
+        LOGGER.info(message)
+
+
 def get_image_store_path() -> Path:
     raw_path = os.getenv("SEATALK_PRIVATE_IMAGE_STORE_PATH", "").strip()
     return Path(raw_path) if raw_path else DEFAULT_IMAGE_STORE_PATH
@@ -198,6 +210,13 @@ def download_seatalk_image(
     extension = _guess_extension(response, image_url)
     image_path = target_dir / f"{_safe_filename_stem(filename_hint)}{extension}"
     image_path.write_bytes(response.content)
+    _log_flow_step(
+        "seatalk_download",
+        "download_media",
+        "ok",
+        bytes=len(response.content),
+        image_path=image_path,
+    )
     LOGGER.info(
         "Seatalk image download success | image_url=%s | bytes=%s | path=%s",
         image_url,
@@ -405,12 +424,14 @@ def remove_background_with_space(image_path: Path) -> Path:
     asset_ref = _normalize_result_asset(result)
     if not asset_ref:
         raise UploadImageError("Remove background API did not return an image result.")
+    _log_flow_step("removebg", "space_predict", "ok", space_id=space_id, api_name=api_name)
 
     output_path = _download_or_copy_result_asset(
         asset_ref,
         filename_hint=f"{image_path.stem}-removebg",
     )
     output_path = convert_image_to_png(output_path)
+    _log_flow_step("removebg", "prepare_png_result", "ok", output_path=output_path, bytes=output_path.stat().st_size)
     LOGGER.info(
         "Remove background success | source=%s | output=%s | asset_ref=%s",
         image_path,
@@ -469,16 +490,20 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
             upload_zone = page.locator(".ant-upload-drag-container").first
             upload_zone.wait_for(timeout=timeout_ms)
+            _log_flow_step("vendor_upload", "auth_and_open_page", "ok", upload_url=upload_url)
             LOGGER.info("Vendor upload auth success | url=%s", upload_url)
         except PlaywrightTimeoutError as exc:
+            _log_flow_step("vendor_upload", "auth_and_open_page", "fail", upload_url=upload_url)
             LOGGER.error("Vendor upload auth failed | url=%s", upload_url)
             browser.close()
             raise UploadImageError("Website auth failed or upload area did not appear.") from exc
 
         file_input = page.locator("input[type='file']").first
         if file_input.count() <= 0:
+            _log_flow_step("vendor_upload", "find_file_input", "fail", image_path=image_path)
             browser.close()
             raise UploadImageError("Upload input not found on vendor tool page.")
+        _log_flow_step("vendor_upload", "find_file_input", "ok", image_path=image_path)
 
         existing_rows = _wait_for_vendor_table_rows(page, timeout_ms=min(timeout_ms, 8000))
         existing_urls = [
@@ -494,9 +519,11 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             existing_row_count,
             existing_rows,
         )
+        _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=existing_row_count)
 
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
+        _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
         try:
             page.wait_for_function(
                 """() => {
@@ -507,13 +534,16 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 timeout=min(timeout_ms, 8000),
             )
             page.wait_for_timeout(1000)
+            _log_flow_step("vendor_upload", "wait_upload_component", "ok", image_name=image_path.name)
             LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
         except PlaywrightTimeoutError:
+            _log_flow_step("vendor_upload", "wait_upload_component", "warn", image_name=image_path.name)
             LOGGER.warning(
                 "Vendor upload component did not expose a done state before timeout | image_path=%s",
                 image_path,
             )
             page.wait_for_timeout(2000)
+        _log_flow_step("vendor_upload", "upload_to_component", "ok", image_path=image_path)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
         checkbox = page.locator("input#basic_isSensitive").first
@@ -532,8 +562,10 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                     )
                     if not unchecked:
                         raise UploadImageError("Khong bo tick duoc o du lieu nhay cam tren Vendor Tool.")
+                    _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "ok", image_path=image_path)
                     LOGGER.info("Vendor sensitive-data checkbox unchecked before save | image_path=%s", image_path)
             except Exception:
+                _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "fail", image_path=image_path)
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
         try:
@@ -541,8 +573,10 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 page.get_by_role("button", name="Save").click(timeout=timeout_ms)
             except PlaywrightTimeoutError:
                 page.locator("button[type='submit'].ant-btn-primary").first.click(timeout=timeout_ms)
+            _log_flow_step("vendor_upload", "click_save", "ok", image_path=image_path)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
         except PlaywrightTimeoutError as exc:
+            _log_flow_step("vendor_upload", "click_save", "fail", image_path=image_path)
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
             browser.close()
             raise UploadImageError("Save button was not clickable.") from exc
@@ -586,16 +620,26 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             existing_top_row,
             final_candidates,
         )
+        _log_flow_step(
+            "vendor_upload",
+            "read_rows_after_save",
+            "ok" if len(final_candidates) == 1 else "warn",
+            row_count=final_row_count,
+            candidates=len(final_candidates),
+        )
         browser.close()
 
     if len(final_candidates) > 1:
+        _log_flow_step("vendor_upload", "finalize_public_url", "fail", candidates=len(final_candidates))
         LOGGER.error("Vendor result URL ambiguous | image_path=%s | candidates=%s", image_path, final_candidates)
         raise UploadImageError("Vendor Tool tra ve nhieu link moi cung luc, khong xac dinh duoc link cua anh vua upload.")
 
     final_url = final_candidates[0].get("file_url", "") if final_candidates else ""
     if not final_url.startswith(public_url_prefix):
+        _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=image_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
         raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
+    _log_flow_step("vendor_upload", "finalize_public_url", "ok", final_url=final_url)
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 
@@ -607,6 +651,8 @@ def send_seatalk_text_reply(client: SeaTalkClient, content: str) -> dict[str, An
 
 
 def send_seatalk_image_reply(client: SeaTalkClient, image_path: Path) -> dict[str, Any]:
+    _log_flow_step("seatalk_reply", "send_image_reply", "pending", image_path=image_path, bytes=image_path.stat().st_size)
     result = client.send_image_path(image_path)
+    _log_flow_step("seatalk_reply", "send_image_reply", "ok", image_path=image_path, bytes=image_path.stat().st_size)
     LOGGER.info("Seatalk image reply success | image_path=%s | bytes=%s", image_path, image_path.stat().st_size)
     return result

@@ -724,6 +724,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         exc,
                     )
                     final_url = upload_image_to_vendor_tool(output_path)
+                    LOGGER.info(
+                        "Removebg fallback to Vendor Tool link succeeded | employee_code=%s | final_url=%s",
+                        employee_code,
+                        final_url,
+                    )
                     fallback_reply = (
                         "**Tach nen anh thanh cong**\n"
                         "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"

@@ -135,6 +135,10 @@ class SeaTalkClient:
                 "usable_platform": self.settings.usable_platform,
                 **message_payload,
             }
+            if self.settings.thread_id:
+                payload["thread_id"] = self.settings.thread_id
+            if self.settings.quoted_message_id:
+                payload["quoted_message_id"] = self.settings.quoted_message_id
             url = f"{SEATALK_OPENAPI_BASE}/messaging/v2/single_chat"
         else:
             raise SeaTalkError("SeaTalk target missing. Set group_id or employee_code.")
