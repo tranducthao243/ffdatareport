@@ -362,6 +362,124 @@ def _force_uncheck_sensitive_checkbox(page) -> bool:
     )
 
 
+def _install_sensitive_submit_patch(page) -> bool:
+    return bool(
+        page.evaluate(
+            """() => {
+                if (window.__vendorSensitiveSubmitPatchInstalled) {
+                    return true;
+                }
+
+                const patchPayloadObject = (payload) => {
+                    if (!payload || typeof payload !== 'object') return false;
+                    const operationName = String(payload.operationName || '').trim();
+                    const query = String(payload.query || '');
+                    const looksLikeUpload = operationName === 'uploadFileTool' || query.includes('uploadFileTool');
+                    if (!looksLikeUpload) return false;
+                    if (!payload.variables || typeof payload.variables !== 'object') {
+                        payload.variables = {};
+                    }
+                    if (!payload.variables.input || typeof payload.variables.input !== 'object') {
+                        payload.variables.input = {};
+                    }
+                    payload.variables.input.isSensitive = false;
+                    return true;
+                };
+
+                const patchStringBody = (body) => {
+                    if (typeof body !== 'string' || !body) {
+                        return { body, patched: false };
+                    }
+
+                    try {
+                        const jsonPayload = JSON.parse(body);
+                        if (patchPayloadObject(jsonPayload)) {
+                            return { body: JSON.stringify(jsonPayload), patched: true };
+                        }
+                    } catch (error) {}
+
+                    try {
+                        const params = new URLSearchParams(body);
+                        if (params.has('operations')) {
+                            const operationsRaw = params.get('operations') || '';
+                            const operationsPayload = JSON.parse(operationsRaw);
+                            if (patchPayloadObject(operationsPayload)) {
+                                params.set('operations', JSON.stringify(operationsPayload));
+                                return { body: params.toString(), patched: true };
+                            }
+                        }
+                    } catch (error) {}
+
+                    return { body, patched: false };
+                };
+
+                const patchFormDataBody = (formData) => {
+                    if (!(formData instanceof FormData)) {
+                        return { body: formData, patched: false };
+                    }
+                    const operationsRaw = formData.get('operations');
+                    if (typeof operationsRaw !== 'string' || !operationsRaw) {
+                        return { body: formData, patched: false };
+                    }
+                    try {
+                        const operationsPayload = JSON.parse(operationsRaw);
+                        if (!patchPayloadObject(operationsPayload)) {
+                            return { body: formData, patched: false };
+                        }
+                        formData.set('operations', JSON.stringify(operationsPayload));
+                        return { body: formData, patched: true };
+                    } catch (error) {
+                        return { body: formData, patched: false };
+                    }
+                };
+
+                const patchOutgoingBody = (body) => {
+                    if (typeof body === 'string') {
+                        return patchStringBody(body);
+                    }
+                    if (body instanceof FormData) {
+                        return patchFormDataBody(body);
+                    }
+                    return { body, patched: false };
+                };
+
+                const originalFetch = window.fetch.bind(window);
+                window.fetch = async (...args) => {
+                    let [resource, init] = args;
+                    if (String(resource || '').includes('/graphql') && init && 'body' in init) {
+                        const patched = patchOutgoingBody(init.body);
+                        if (patched.patched) {
+                            init = { ...init, body: patched.body };
+                            window.__vendorSensitiveSubmitLastPatchedAt = Date.now();
+                        }
+                    }
+                    return originalFetch(resource, init);
+                };
+
+                const originalXhrOpen = XMLHttpRequest.prototype.open;
+                const originalXhrSend = XMLHttpRequest.prototype.send;
+                XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+                    this.__vendorGraphqlUrl = String(url || '');
+                    return originalXhrOpen.call(this, method, url, ...rest);
+                };
+                XMLHttpRequest.prototype.send = function(body) {
+                    if (String(this.__vendorGraphqlUrl || '').includes('/graphql')) {
+                        const patched = patchOutgoingBody(body);
+                        body = patched.body;
+                        if (patched.patched) {
+                            window.__vendorSensitiveSubmitLastPatchedAt = Date.now();
+                        }
+                    }
+                    return originalXhrSend.call(this, body);
+                };
+
+                window.__vendorSensitiveSubmitPatchInstalled = true;
+                return true;
+            }"""
+        )
+    )
+
+
 def _visible_save_button(page):
     buttons = page.locator("#basic button[type='submit']")
     total_count = buttons.count()
@@ -457,8 +575,16 @@ def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: P
             affected = page.evaluate(
                 """() => {
                     const checkedNodes = Array.from(document.querySelectorAll('#basic input#basic_isSensitive:checked'));
+                    const inputProto = window.HTMLInputElement && window.HTMLInputElement.prototype;
+                    const checkedSetter = inputProto
+                        ? Object.getOwnPropertyDescriptor(inputProto, 'checked')?.set
+                        : null;
                     for (const node of checkedNodes) {
-                        node.checked = false;
+                        if (checkedSetter) {
+                            checkedSetter.call(node, false);
+                        } else {
+                            node.checked = false;
+                        }
                         node.dispatchEvent(new Event('input', { bubbles: true }));
                         node.dispatchEvent(new Event('change', { bubbles: true }));
                     }
@@ -1122,6 +1248,8 @@ def upload_image_to_vendor_tool(
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
             page.locator(".ant-upload-drag-container").first.wait_for(timeout=timeout_ms)
+            patch_installed = _install_sensitive_submit_patch(page)
+            LOGGER.info("sensitive_submit_patch_installed=%s", "ok" if patch_installed else "fail")
             _log_flow_step("vendor_upload", "auth_and_open_page", "ok", upload_url=upload_url)
             LOGGER.info("Vendor upload auth success | url=%s", upload_url)
         except PlaywrightTimeoutError as exc:
