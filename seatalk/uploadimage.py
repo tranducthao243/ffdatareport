@@ -348,9 +348,11 @@ def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | b
 
 def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: Path) -> None:
     checkbox = page.locator("input#basic_isSensitive").first
-    label = page.locator(
-        "#basic > div.ant-form-item.css-jycdem.ant-form-item-has-success > div > div > div > div > label"
-    ).first
+    click_targets = [
+        ("label.ant-checkbox-wrapper", page.locator("label.ant-checkbox-wrapper").first),
+        (".ant-checkbox-inner", page.locator(".ant-checkbox-inner").first),
+        ("#basic_isSensitive", checkbox),
+    ]
     if checkbox.count() <= 0:
         _log_flow_step("vendor_upload", "sensitive_checkbox_before", "warn", found=False)
         _log_flow_step("vendor_upload", "sensitive_checkbox_after", "warn", found=False)
@@ -363,19 +365,27 @@ def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: P
     _log_flow_step("vendor_upload", "sensitive_checkbox_before", "ok", checked=before_checked)
     LOGGER.info("Vendor sensitive checkbox before save | image_path=%s | checked=%s", image_path, before_checked)
     if before_checked:
-        if label.count() <= 0:
-            raise UploadImageError("Khong tim thay label checkbox du lieu nhay cam tren Vendor Tool.")
-        for attempt in (1, 2):
-            _log_flow_step("vendor_upload", "sensitive_checkbox_click_label", "ok", attempt=attempt)
-            label.click(timeout=timeout_ms)
+        target_index = 0
+        max_attempts = 4
+        for attempt in range(1, max_attempts + 1):
+            target_name, target = click_targets[target_index]
+            if target.count() <= 0:
+                target_index = (target_index + 1) % len(click_targets)
+                continue
+            _log_flow_step("vendor_upload", "sensitive_checkbox_click_target", "ok", attempt=attempt, target=target_name)
+            target.click(timeout=timeout_ms)
             page.wait_for_timeout(250)
             if not checkbox.is_checked():
                 break
+            _log_flow_step("vendor_upload", "sensitive_checkbox_retry", "warn", attempt=attempt, target=target_name)
             LOGGER.warning(
-                "Vendor sensitive checkbox still checked after label click | image_path=%s | attempt=%s",
+                "Vendor sensitive checkbox still checked after click | image_path=%s | attempt=%s | target=%s",
                 image_path,
                 attempt,
+                target_name,
             )
+            # Auto-recheck/rerender: rotate next target and retry once more.
+            target_index = (target_index + 1) % len(click_targets)
     after_checked = checkbox.is_checked()
     _log_flow_step("vendor_upload", "sensitive_checkbox_after", "ok" if not after_checked else "fail", checked=after_checked)
     LOGGER.info("Vendor sensitive checkbox after save prep | image_path=%s | checked=%s", image_path, after_checked)
