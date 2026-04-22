@@ -814,12 +814,27 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         _ensure_sensitive_checkbox_unchecked(page, timeout_ms=min(timeout_ms, 10000), image_path=image_path)
 
         def _click_save() -> None:
-            save_button_visible = page.locator("#basic button[type='submit'].ant-btn-primary:visible")
-            save_button = save_button_visible.first if save_button_visible.count() > 0 else page.locator(
-                "#basic button[type='submit'].ant-btn-primary"
-            ).first
-            if save_button.count() <= 0:
+            save_buttons = page.locator("#basic button[type='submit']")
+            save_button_total_count = save_buttons.count()
+            save_buttons_visible = page.locator("#basic button[type='submit']:visible")
+            save_button_visible_count = save_buttons_visible.count()
+            _log_flow_step("vendor_upload", "save_button_total_count", "ok", count=save_button_total_count)
+            _log_flow_step("vendor_upload", "save_button_visible_count", "ok", count=save_button_visible_count)
+            if save_button_visible_count <= 0:
                 raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
+            save_button = save_buttons_visible.first
+
+            target_html = ""
+            try:
+                target_html = str(save_button.evaluate("node => node.outerHTML") or "").strip()
+            except Exception:
+                target_html = ""
+            _log_flow_step(
+                "vendor_upload",
+                "save_button_target_html",
+                "ok" if target_html else "warn",
+                html=target_html[:300],
+            )
 
             disabled_before = False
             try:
@@ -855,13 +870,10 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             except Exception:
                 pass
 
-            page.evaluate(
-                """() => {
-                    const root = document.querySelector('#basic');
-                    const btn = root ? root.querySelector("button[type='submit'].ant-btn-primary") : null;
-                    if (btn) btn.click();
-                }"""
-            )
+            try:
+                save_button.evaluate("node => node.click()")
+            except Exception as exc:
+                raise UploadImageError(f"Khong bam duoc nut Save tren Vendor Tool: {exc}") from exc
 
         upload_response_payload: dict[str, Any] = {}
         upload_response_status = 0
