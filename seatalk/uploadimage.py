@@ -504,7 +504,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                     const done = document.querySelectorAll('.ant-upload-list-item-done').length;
                     return uploading === 0 && done > 0;
                 }""",
-                timeout=timeout_ms,
+                timeout=min(timeout_ms, 8000),
             )
             page.wait_for_timeout(1000)
             LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
@@ -513,7 +513,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 "Vendor upload component did not expose a done state before timeout | image_path=%s",
                 image_path,
             )
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2000)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
         checkbox = page.locator("input#basic_isSensitive").first

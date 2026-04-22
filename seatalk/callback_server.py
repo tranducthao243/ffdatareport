@@ -30,6 +30,7 @@ from app.health import (
 )
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
+from datasocial.seatalk import SeaTalkError
 
 from .auth import build_seatalk_client
 from .callbacks import (
@@ -706,6 +707,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     filename_hint=str(image_entry.get("message_id") or employee_code),
                 )
                 output_path = remove_background_with_space(image_path)
+                fallback_reply = ""
 
                 private_client = build_seatalk_client(
                     app_id=runtime["seatalk_app_id"],
@@ -713,7 +715,20 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     employee_code=employee_code,
                     thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
                 )
-                send_seatalk_image_reply(private_client, output_path)
+                try:
+                    send_seatalk_image_reply(private_client, output_path)
+                except SeaTalkError as exc:
+                    LOGGER.warning(
+                        "SeaTalk direct image reply failed for removebg; falling back to Vendor Tool link | employee_code=%s | error=%s",
+                        employee_code,
+                        exc,
+                    )
+                    final_url = upload_image_to_vendor_tool(output_path)
+                    fallback_reply = (
+                        "**Tach nen anh thanh cong**\n"
+                        "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"
+                        f"- Link anh: {final_url}"
+                    )
             except UploadImageError as exc:
                 LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
                 with private_message_lock:
@@ -739,7 +754,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             with private_message_lock:
                 active_uploads.discard(active_job)
-            return ""
+            return fallback_reply
 
         def _build_report_text(self, report_code: str) -> str:
             package = build_report_package_by_code(
