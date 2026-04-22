@@ -346,6 +346,90 @@ def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | b
     )
 
 
+def _extract_graphql_files(payload: dict[str, Any]) -> list[dict[str, str]]:
+    data = payload.get("data") or {}
+    files = data.get("getMyFilesUploadTool")
+    if not isinstance(files, list):
+        return []
+    rows: list[dict[str, str]] = []
+    for item in files:
+        if not isinstance(item, dict):
+            continue
+        rows.append(
+            {
+                "id": str(item.get("id") or "").strip(),
+                "email": str(item.get("email") or "").strip().lower(),
+                "file": str(item.get("file") or "").strip(),
+                "createdAt": str(item.get("createdAt") or "").strip(),
+            }
+        )
+    return rows
+
+
+def _fetch_vendor_graphql_files(page) -> list[dict[str, str]]:
+    query = """
+    query FetchMyFilesUploadTool {
+      getMyFilesUploadTool {
+        id
+        email
+        file
+        createdAt
+      }
+    }
+    """
+    response = page.request.post(
+        "https://vendors.garena.vn/graphql",
+        data={"query": query, "variables": {}},
+        timeout=30_000,
+    )
+    if not response.ok:
+        raise UploadImageError(f"Vendor GraphQL getMyFilesUploadTool failed with HTTP {response.status}.")
+    payload = response.json()
+    rows = _extract_graphql_files(payload)
+    LOGGER.info("Vendor GraphQL getMyFilesUploadTool snapshot | rows=%s", len(rows))
+    return rows
+
+
+def _normalize_public_url(url: str, *, public_url_prefix: str) -> str:
+    clean = str(url or "").strip()
+    if not clean.startswith(public_url_prefix):
+        return ""
+    return clean.split("?", 1)[0].strip()
+
+
+def _parse_created_at(value: str) -> datetime:
+    text = str(value or "").strip()
+    if not text:
+        return datetime.min
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return datetime.min
+
+
+def _pick_new_vendor_url(
+    rows: list[dict[str, str]],
+    *,
+    before_urls: set[str],
+    public_url_prefix: str,
+    owner_email: str,
+) -> str:
+    candidates: list[tuple[datetime, str]] = []
+    for row in rows:
+        url = _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
+        if not url or url in before_urls:
+            continue
+        row_email = str(row.get("email") or "").strip().lower()
+        if owner_email and row_email and row_email != owner_email:
+            continue
+        created_at = _parse_created_at(row.get("createdAt", ""))
+        candidates.append((created_at, url))
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return candidates[0][1]
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -513,6 +597,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
     headless = os.getenv("VENDOR_UPLOAD_HEADLESS", "true").strip().lower() not in {"0", "false", "no"}
     timeout_ms = int(os.getenv("VENDOR_UPLOAD_TIMEOUT_MS", "60000").strip() or "60000")
     result_timeout_ms = int(os.getenv("VENDOR_UPLOAD_RESULT_TIMEOUT_MS", "15000").strip() or "15000")
+    owner_email = os.getenv("VENDOR_OWNER_EMAIL", "").strip().lower()
 
     if not auth_token:
         raise UploadImageError("Missing VENDOR_AUTH_TOKEN.")
@@ -545,6 +630,28 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             ]
         )
         page = context.new_page()
+        graphql_events: list[dict[str, Any]] = []
+
+        def on_response(response) -> None:
+            if "/graphql" not in response.url:
+                return
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
+            try:
+                request_payload = response.request.post_data_json
+            except Exception:
+                request_payload = {}
+            graphql_events.append(
+                {
+                    "status": response.status,
+                    "request": request_payload,
+                    "response": payload,
+                }
+            )
+
+        page.on("response", on_response)
 
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -565,26 +672,51 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             raise UploadImageError("Upload input not found on vendor tool page.")
         _log_flow_step("vendor_upload", "find_file_input", "ok", image_path=image_path)
 
-        existing_rows = _wait_for_vendor_table_rows(page, timeout_ms=min(timeout_ms, 8000))
-        existing_urls = [
-            row["file_url"]
+        existing_rows = _fetch_vendor_graphql_files(page)
+        if not owner_email:
+            for row in existing_rows:
+                row_email = str(row.get("email") or "").strip().lower()
+                if row_email:
+                    owner_email = row_email
+                    break
+        existing_urls = {
+            _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
             for row in existing_rows
-            if row.get("file_url", "").startswith(public_url_prefix)
-        ]
-        existing_row_count = len(existing_rows)
+        }
+        existing_urls.discard("")
         LOGGER.info(
-            "Vendor URLs before save | image_path=%s | row_count=%s | rows=%s",
+            "Vendor URLs before save | image_path=%s | row_count=%s | owner_email=%s | rows=%s",
             image_path,
-            existing_row_count,
+            len(existing_rows),
+            owner_email or "-",
             existing_rows,
         )
-        _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=existing_row_count)
+        _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=len(existing_rows))
 
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
         try:
             upload_state = _wait_for_vendor_upload_ready(page, timeout_ms=min(timeout_ms, 20000))
+            upload_confirmed = False
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                for event in graphql_events:
+                    response_payload = event.get("response") or {}
+                    data = response_payload.get("data") or {}
+                    if data.get("uploadFileTool") is True:
+                        upload_confirmed = True
+                        LOGGER.info(
+                            "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
+                            event.get("status"),
+                            response_payload,
+                        )
+                        break
+                if upload_confirmed:
+                    break
+                page.wait_for_timeout(500)
+            if not upload_confirmed:
+                raise UploadImageError("Khong nhan duoc xac nhan GraphQL uploadFileTool=true sau khi chon file.")
             page.wait_for_timeout(1000)
             _log_flow_step(
                 "vendor_upload",
@@ -595,7 +727,11 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 done=upload_state.get("done"),
                 errors=upload_state.get("error"),
             )
-            LOGGER.info("Vendor upload component ready for save | image_path=%s | upload_state=%s", image_path, upload_state)
+            LOGGER.info(
+                "Vendor upload component ready for save | image_path=%s | upload_state=%s",
+                image_path,
+                upload_state,
+            )
         except UploadImageError:
             _log_flow_step("vendor_upload", "wait_upload_component", "fail", image_name=image_path.name)
             raise
@@ -624,7 +760,6 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "fail", image_path=image_path)
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
-        save_started_at = datetime.now()
         try:
             try:
                 page.get_by_role("button", name="Save").click(timeout=timeout_ms)
@@ -638,69 +773,39 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Save button was not clickable.") from exc
 
-        LOGGER.info(
-            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s",
-            image_path,
-            result_timeout_ms,
-            len(existing_urls),
-        )
+        LOGGER.info("Waiting for vendor result URL | image_path=%s | timeout_ms=%s", image_path, result_timeout_ms)
         deadline = time.monotonic() + (result_timeout_ms / 1000)
-        final_candidate: dict[str, str] | None = None
-        final_row_count = existing_row_count
+        latest_rows: list[dict[str, str]] = []
+        final_url = ""
         while time.monotonic() < deadline:
-            try:
-                page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
-            except PlaywrightTimeoutError:
-                LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
-            current_rows = _wait_for_vendor_table_rows(page, timeout_ms=3000)
-            current_row_count = len(current_rows)
-            new_rows = [
-                row
-                for row in current_rows
-                if row.get("file_url", "").startswith(public_url_prefix)
-                and row.get("file_url", "") not in existing_urls
-            ]
-            recent_new_rows: list[dict[str, str]] = []
-            for row in new_rows:
-                created_at = str(row.get("created_at") or "").strip()
-                if not created_at:
-                    recent_new_rows.append(row)
-                    continue
-                parsed_created_at: datetime | None = None
-                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
-                    try:
-                        parsed_created_at = datetime.strptime(created_at, fmt)
-                        break
-                    except ValueError:
-                        continue
-                if parsed_created_at is None:
-                    recent_new_rows.append(row)
-                    continue
-                if parsed_created_at >= save_started_at.replace(microsecond=0):
-                    recent_new_rows.append(row)
-            candidates = recent_new_rows or new_rows
-            if candidates:
-                final_candidate = candidates[0]
-                final_row_count = current_row_count
+            latest_rows = _fetch_vendor_graphql_files(page)
+            final_url = _pick_new_vendor_url(
+                latest_rows,
+                before_urls=existing_urls,
+                public_url_prefix=public_url_prefix,
+                owner_email=owner_email,
+            )
+            if final_url:
                 break
             page.wait_for_timeout(1000)
 
         LOGGER.info(
-            "Vendor URLs after save | image_path=%s | row_count=%s | final_candidate=%s",
+            "Vendor URLs after save | image_path=%s | row_count=%s | rows=%s",
             image_path,
-            final_row_count,
-            final_candidate,
+            len(latest_rows),
+            latest_rows,
         )
+        if final_url:
+            LOGGER.info("Vendor new URL detected | image_path=%s | final_url=%s", image_path, final_url)
         _log_flow_step(
             "vendor_upload",
             "read_rows_after_save",
-            "ok" if final_candidate else "warn",
-            row_count=final_row_count,
-            candidates=1 if final_candidate else 0,
+            "ok" if final_url else "warn",
+            row_count=len(latest_rows),
+            candidates=1 if final_url else 0,
         )
         browser.close()
 
-    final_url = final_candidate.get("file_url", "") if final_candidate else ""
     if not final_url.startswith(public_url_prefix):
         _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=image_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)

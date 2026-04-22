@@ -39,6 +39,10 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(extract_hashtag_query("hashtag #ob53"), "ob53")
         self.assertEqual(extract_hashtag_query("hashtagob53"), "ob53")
 
+    def test_imagelink_command_alias_is_detected(self):
+        self.assertEqual(classify_private_command("imagelink"), "imagelink")
+        self.assertEqual(classify_private_command("uploadimage"), "imagelink")
+
     def test_format_hashtag_report_summarizes_views_by_category(self):
         rows = [
             {

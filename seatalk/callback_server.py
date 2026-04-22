@@ -439,7 +439,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             message_text = callback_context["message_text"]
             command = classify_private_command(message_text)
             message_id = callback_context.get("message_id", "")
-            if command in {"uploadimage", "removebg"} and message_id:
+            if command in {"imagelink", "removebg"} and message_id:
                 with private_message_lock:
                     if message_id in handled_private_message_ids:
                         LOGGER.info(
@@ -516,7 +516,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
                 reply_text = format_hashtag_report(runtime["db_path"], message_text)
-            elif command == "uploadimage":
+            elif command == "imagelink":
                 reply_text = self._handle_uploadimage_command(callback_context)
             elif command == "removebg":
                 reply_text = self._handle_removebg_command(callback_context)
@@ -544,7 +544,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "\n"
                     "**Tính năng sắp cập nhật**\n"
                     "- `shortlink`: tạo shortlink từ link và config\n"
-                    "- `uploadimage`: tải ảnh lên web nội bộ và trả link ảnh\n"
+                    "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh\n"
                     "- `enhanceimage`: làm nét ảnh rồi trả kết quả\n"
                     "- `removebg`: tách nền ảnh và trả lại ảnh\n"
                     "\n"
@@ -595,7 +595,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 client,
                 (
                     "**Da nhan anh gan nhat cua ban**\n"
-                    "*Go `uploadimage` de tai anh len web noi bo va nhan link ket qua.*\n"
+                    "*Go `imagelink` de tai anh len web noi bo va nhan link ket qua.*\n"
                     "*Go `removebg` de tach nen anh va tra lai anh ket qua.*"
                 ),
             )
@@ -603,10 +603,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
             active_job = (employee_code, "uploadimage")
-            LOGGER.info("Seatalk uploadimage command received | employee_code=%s", employee_code)
+            LOGGER.info("Seatalk imagelink command received | employee_code=%s", employee_code)
             with private_message_lock:
                 if active_job in active_uploads:
-                    LOGGER.info("Seatalk uploadimage already in progress | employee_code=%s", employee_code)
+                    LOGGER.info("Seatalk imagelink already in progress | employee_code=%s", employee_code)
                     return (
                         "**Ảnh gần nhất của bạn đang được xử lý**\n"
                         "*Vui lòng chờ bot hoàn tất rồi thử lại nếu cần.*"
@@ -623,7 +623,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     active_uploads.discard(active_job)
                 return (
                     "**Chưa có ảnh nào để tải lên**\n"
-                    "*Hãy gửi một ảnh cho bot trước, sau đó gõ `uploadimage`.*"
+                    "*Hãy gửi một ảnh cho bot trước, sau đó gõ `imagelink`.*"
                 )
 
             try:
