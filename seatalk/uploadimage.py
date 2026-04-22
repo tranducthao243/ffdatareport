@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from PIL import Image
 
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
 
@@ -250,6 +251,17 @@ def _download_or_copy_result_asset(
     return target_path
 
 
+def convert_image_to_png(image_path: Path) -> Path:
+    if image_path.suffix.lower() == ".png":
+        return image_path
+
+    target_path = image_path.with_suffix(".png")
+    with Image.open(image_path) as image:
+        image.convert("RGBA").save(target_path, format="PNG", optimize=True)
+    LOGGER.info("Converted image to PNG for SeaTalk delivery | source=%s | output=%s", image_path, target_path)
+    return target_path
+
+
 def remove_background_with_space(image_path: Path) -> Path:
     space_id = os.getenv("REMOVEBG_SPACE_ID", DEFAULT_REMOVEBG_SPACE_ID).strip() or DEFAULT_REMOVEBG_SPACE_ID
     api_name = os.getenv("REMOVEBG_API_NAME", DEFAULT_REMOVEBG_API_NAME).strip() or DEFAULT_REMOVEBG_API_NAME
@@ -280,6 +292,7 @@ def remove_background_with_space(image_path: Path) -> Path:
         asset_ref,
         filename_hint=f"{image_path.stem}-removebg",
     )
+    output_path = convert_image_to_png(output_path)
     LOGGER.info(
         "Remove background success | source=%s | output=%s | asset_ref=%s",
         image_path,
@@ -350,13 +363,11 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             raise UploadImageError("Upload input not found on vendor tool page.")
 
         existing_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-        existing_top_url = _extract_top_row_public_url(page, public_url_prefix=public_url_prefix)
         existing_row_count = page.locator("tbody tr").count()
         LOGGER.info(
-            "Vendor URLs before save | image_path=%s | row_count=%s | top_url=%s | urls=%s",
+            "Vendor URLs before save | image_path=%s | row_count=%s | urls=%s",
             image_path,
             existing_row_count,
-            existing_top_url or "-",
             existing_urls,
         )
 
@@ -380,14 +391,38 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             page.wait_for_timeout(1500)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
-        checkbox = page.locator("input[type='checkbox']").first
+        checkbox = page.locator("input#basic_isSensitive").first
         if checkbox.count() > 0:
             try:
                 if checkbox.is_checked():
-                    checkbox.uncheck(force=True)
+                    unchecked = page.evaluate(
+                        """() => {
+                            const checkbox = document.querySelector('#basic_isSensitive') || document.querySelector('input[type="checkbox"]');
+                            if (!checkbox) return false;
+                            checkbox.checked = false;
+                            checkbox.dispatchEvent(new Event('input', { bubbles: true }));
+                            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                            return checkbox.checked === false;
+                        }"""
+                    )
+                    if not unchecked:
+                        raise UploadImageError("Khong bo tick duoc o du lieu nhay cam tren Vendor Tool.")
                     LOGGER.info("Vendor sensitive-data checkbox unchecked before save | image_path=%s", image_path)
             except Exception:
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
+
+        captured_response_urls: list[str] = []
+
+        def _capture_response(response: Any) -> None:
+            try:
+                body_text = response.text()
+            except Exception:
+                return
+            for url in _extract_public_urls(body_text, public_url_prefix=public_url_prefix):
+                if url not in captured_response_urls:
+                    captured_response_urls.append(url)
+
+        page.on("response", _capture_response)
 
         try:
             page.get_by_role("button", name="Save").click(timeout=timeout_ms)
@@ -404,8 +439,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             len(existing_urls),
         )
         deadline = time.monotonic() + (result_timeout_ms / 1000)
-        new_urls: list[str] = []
-        final_top_url = ""
+        final_candidates: list[str] = []
         final_row_count = existing_row_count
         while time.monotonic() < deadline:
             try:
@@ -413,33 +447,33 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             except PlaywrightTimeoutError:
                 LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
             current_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-            current_top_url = _extract_top_row_public_url(page, public_url_prefix=public_url_prefix)
             current_row_count = page.locator("tbody tr").count()
-            new_urls = [url for url in current_urls if url not in existing_urls]
-            if (
-                current_top_url
-                and current_top_url not in existing_urls
-                and current_top_url != existing_top_url
-                and current_row_count >= existing_row_count
-            ):
-                final_top_url = current_top_url
+            final_candidates = []
+            for url in captured_response_urls + current_urls:
+                if url not in existing_urls and url not in final_candidates:
+                    final_candidates.append(url)
+            if len(final_candidates) == 1:
                 final_row_count = current_row_count
                 break
             page.wait_for_timeout(1000)
 
         LOGGER.info(
-            "Vendor URLs after save | image_path=%s | row_count=%s | top_url=%s | new_urls=%s",
+            "Vendor URLs after save | image_path=%s | row_count=%s | new_urls=%s | response_urls=%s",
             image_path,
             final_row_count,
-            final_top_url or "-",
-            new_urls,
+            final_candidates,
+            captured_response_urls,
         )
         browser.close()
 
-    final_url = final_top_url
+    if len(final_candidates) > 1:
+        LOGGER.error("Vendor result URL ambiguous | image_path=%s | candidates=%s", image_path, final_candidates)
+        raise UploadImageError("Vendor Tool tra ve nhieu link moi cung luc, khong xac dinh duoc link cua anh vua upload.")
+
+    final_url = final_candidates[0] if final_candidates else ""
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
-        raise UploadImageError("Da bam Save nhung khong thay top row moi voi public URL moi tren Vendor Tool.")
+        raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 

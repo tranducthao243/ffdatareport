@@ -1,6 +1,7 @@
 import unittest
 import base64
 from unittest.mock import Mock, patch
+from PIL import Image
 
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
 from datasocial.formatter import render_seatalk_report
@@ -20,6 +21,7 @@ from seatalk.sender import send_report_packages
 from seatalk.uploadimage import (
     _filename_match_tokens,
     _safe_filename_stem,
+    convert_image_to_png,
     get_latest_unprocessed_image_for_user,
     mark_image_processed_for_user,
     store_latest_image_for_user,
@@ -251,6 +253,16 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertNotEqual(stem_one, stem_two)
         self.assertNotEqual(stem_one.rsplit("-", 1)[-1], stem_two.rsplit("-", 1)[-1])
         self.assertIn(stem_one.rsplit("-", 1)[-1], _filename_match_tokens(Path(f"{stem_one}.jpg")))
+
+    def test_convert_image_to_png_rewrites_webp_output_for_seatalk(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source_path = Path(tmp) / "result.webp"
+            Image.new("RGBA", (4, 4), (255, 0, 0, 128)).save(source_path, format="WEBP")
+
+            converted_path = convert_image_to_png(source_path)
+
+            self.assertEqual(converted_path.suffix.lower(), ".png")
+            self.assertTrue(converted_path.exists())
 
     def test_callback_server_build_runtime_reads_preset_data(self):
         class Args:
