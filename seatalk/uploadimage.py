@@ -25,6 +25,7 @@ DEFAULT_VENDOR_UPLOAD_URL = "https://vendors.garena.vn/upload-tool"
 DEFAULT_VENDOR_PUBLIC_URL_PREFIX = "https://files.garena.vn/garena-social/public/"
 DEFAULT_REMOVEBG_SPACE_ID = "amirgame197/Remove-Background"
 DEFAULT_REMOVEBG_API_NAME = "/predict"
+DEFAULT_SEATALK_IMAGE_MAX_BYTES = 7 * 1024 * 1024
 
 
 class UploadImageError(RuntimeError):
@@ -49,6 +50,15 @@ def _save_store(store_path: Path, payload: dict[str, Any]) -> None:
     temp_path.replace(store_path)
 
 
+def _normalize_processed_commands(entry: dict[str, Any]) -> list[str]:
+    commands = entry.get("processed_commands")
+    if isinstance(commands, list):
+        return [str(item).strip() for item in commands if str(item).strip()]
+    if entry.get("processed"):
+        return ["uploadimage", "removebg"]
+    return []
+
+
 def store_latest_image_for_user(
     store_path: Path,
     *,
@@ -67,6 +77,7 @@ def store_latest_image_for_user(
         "image_url": image_url,
         "stored_at": datetime.now().isoformat(timespec="seconds"),
         "processed": False,
+        "processed_commands": [],
     }
     payload.setdefault("users", {})[employee_code] = entry
     _save_store(store_path, payload)
@@ -79,25 +90,56 @@ def store_latest_image_for_user(
     return entry
 
 
-def get_latest_unprocessed_image_for_user(store_path: Path, *, employee_code: str) -> dict[str, Any] | None:
+def get_latest_unprocessed_image_for_user(
+    store_path: Path,
+    *,
+    employee_code: str,
+    command_name: str,
+) -> dict[str, Any] | None:
     payload = _load_store(store_path)
     entry = (payload.get("users") or {}).get(employee_code)
     if not isinstance(entry, dict):
         return None
-    if entry.get("processed"):
+    processed_commands = _normalize_processed_commands(entry)
+    if command_name in processed_commands:
         return None
     return entry
 
 
-def mark_image_processed_for_user(store_path: Path, *, employee_code: str) -> None:
+def mark_image_processed_for_user(
+    store_path: Path,
+    *,
+    employee_code: str,
+    message_id: str,
+    command_name: str,
+) -> None:
     payload = _load_store(store_path)
     entry = (payload.get("users") or {}).get(employee_code)
     if not isinstance(entry, dict):
         return
-    entry["processed"] = True
+    if str(entry.get("message_id") or "") != str(message_id or ""):
+        LOGGER.info(
+            "Skip marking processed because latest stored image changed | employee_code=%s | expected_message_id=%s | current_message_id=%s | command=%s",
+            employee_code,
+            message_id,
+            entry.get("message_id") or "-",
+            command_name,
+        )
+        return
+    processed_commands = _normalize_processed_commands(entry)
+    if command_name not in processed_commands:
+        processed_commands.append(command_name)
+    entry["processed_commands"] = processed_commands
+    entry["processed"] = len(processed_commands) >= 2
     entry["processed_at"] = datetime.now().isoformat(timespec="seconds")
     _save_store(store_path, payload)
-    LOGGER.info("Seatalk image marked processed | employee_code=%s", employee_code)
+    LOGGER.info(
+        "Seatalk image marked processed | employee_code=%s | message_id=%s | command=%s | processed_commands=%s",
+        employee_code,
+        message_id,
+        command_name,
+        processed_commands,
+    )
 
 
 def _guess_extension(response: requests.Response, image_url: str) -> str:
@@ -223,6 +265,8 @@ def summarize_upload_error(exc: Exception) -> str:
         return "Vendor Tool chua upload xong file vao he thong, nen bot da dung lai truoc khi bam Save."
     if "khong bo tick duoc" in lowered:
         return "Bot khong bo duoc o tick du lieu nhay cam tren Vendor Tool."
+    if "valid length/size limit" in lowered or "4001" in lowered:
+        return "SeaTalk tu choi anh tra ve vi vuot gioi han kich thuoc/noi dung hop le."
     if "public url" in lowered:
         return "Khong tim thay link anh public moi sau khi bam Save."
     if "save button was not clickable" in lowered:
@@ -283,12 +327,35 @@ def _download_or_copy_result_asset(
 
 def convert_image_to_png(image_path: Path) -> Path:
     if image_path.suffix.lower() == ".png":
-        return image_path
+        target_path = image_path
+    else:
+        target_path = image_path.with_suffix(".png")
+        with Image.open(image_path) as image:
+            image.convert("RGBA").save(target_path, format="PNG", optimize=True)
+        LOGGER.info("Converted image to PNG for SeaTalk delivery | source=%s | output=%s", image_path, target_path)
 
-    target_path = image_path.with_suffix(".png")
-    with Image.open(image_path) as image:
-        image.convert("RGBA").save(target_path, format="PNG", optimize=True)
-    LOGGER.info("Converted image to PNG for SeaTalk delivery | source=%s | output=%s", image_path, target_path)
+    max_bytes = int(os.getenv("SEATALK_IMAGE_MAX_BYTES", str(DEFAULT_SEATALK_IMAGE_MAX_BYTES)).strip() or str(DEFAULT_SEATALK_IMAGE_MAX_BYTES))
+    if target_path.stat().st_size <= max_bytes:
+        return target_path
+
+    with Image.open(target_path) as image:
+        working = image.convert("RGBA")
+        width, height = working.size
+        attempt = 0
+        while target_path.stat().st_size > max_bytes and width > 512 and height > 512 and attempt < 6:
+            width = max(int(width * 0.85), 512)
+            height = max(int(height * 0.85), 512)
+            resized = working.resize((width, height), Image.LANCZOS)
+            resized.save(target_path, format="PNG", optimize=True)
+            attempt += 1
+            LOGGER.info(
+                "Reduced PNG size for SeaTalk delivery | path=%s | attempt=%s | width=%s | height=%s | bytes=%s",
+                target_path,
+                attempt,
+                width,
+                height,
+                target_path.stat().st_size,
+            )
     return target_path
 
 

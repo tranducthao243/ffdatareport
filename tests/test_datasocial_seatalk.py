@@ -237,14 +237,72 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
                 thread_id="m2",
             )
 
-            latest = get_latest_unprocessed_image_for_user(store_path, employee_code="110677")
+            latest = get_latest_unprocessed_image_for_user(
+                store_path,
+                employee_code="110677",
+                command_name="uploadimage",
+            )
 
             self.assertIsNotNone(latest)
             self.assertEqual(latest["message_id"], "m2")
             self.assertFalse(latest["processed"])
 
-            mark_image_processed_for_user(store_path, employee_code="110677")
-            self.assertIsNone(get_latest_unprocessed_image_for_user(store_path, employee_code="110677"))
+            mark_image_processed_for_user(
+                store_path,
+                employee_code="110677",
+                message_id="m2",
+                command_name="uploadimage",
+            )
+            self.assertIsNone(
+                get_latest_unprocessed_image_for_user(
+                    store_path,
+                    employee_code="110677",
+                    command_name="uploadimage",
+                )
+            )
+            self.assertIsNotNone(
+                get_latest_unprocessed_image_for_user(
+                    store_path,
+                    employee_code="110677",
+                    command_name="removebg",
+                )
+            )
+
+    def test_mark_processed_does_not_consume_newer_image(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store_path = Path(tmp) / "seatalk_images.json"
+
+            store_latest_image_for_user(
+                store_path,
+                employee_code="110677",
+                seatalk_id="9306358918",
+                message_id="old-msg",
+                image_url="https://openapi.seatalk.io/messaging/v2/file/old",
+                thread_id="old-msg",
+            )
+            store_latest_image_for_user(
+                store_path,
+                employee_code="110677",
+                seatalk_id="9306358918",
+                message_id="new-msg",
+                image_url="https://openapi.seatalk.io/messaging/v2/file/new",
+                thread_id="new-msg",
+            )
+
+            mark_image_processed_for_user(
+                store_path,
+                employee_code="110677",
+                message_id="old-msg",
+                command_name="uploadimage",
+            )
+
+            latest = get_latest_unprocessed_image_for_user(
+                store_path,
+                employee_code="110677",
+                command_name="uploadimage",
+            )
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest["message_id"], "new-msg")
 
     def test_uploadimage_filename_tokens_use_unique_hash_suffix(self):
         stem_one = _safe_filename_stem("u7YirumAclDz6kjP41NhyMkXvXNAhNTqCAnQvTUQ9YuCzzoUoFE7bJ5O")

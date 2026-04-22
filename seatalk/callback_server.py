@@ -614,6 +614,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
                 employee_code=employee_code,
+                command_name="uploadimage",
             )
             if not image_entry:
                 with private_message_lock:
@@ -658,7 +659,12 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     f"*Chi tiết: {summarize_upload_error(exc)}*"
                 )
 
-            mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
+            mark_image_processed_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+                message_id=str(image_entry.get("message_id") or ""),
+                command_name="uploadimage",
+            )
             with private_message_lock:
                 active_uploads.discard(active_job)
             return (
@@ -682,6 +688,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
                 employee_code=employee_code,
+                command_name="removebg",
             )
             if not image_entry:
                 with private_message_lock:
@@ -723,7 +730,12 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     f"*Chi tiet: {summarize_upload_error(exc)}*"
                 )
 
-            mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
+            mark_image_processed_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+                message_id=str(image_entry.get("message_id") or ""),
+                command_name="removebg",
+            )
             with private_message_lock:
                 active_uploads.discard(active_job)
             return ""
