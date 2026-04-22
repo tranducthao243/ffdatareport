@@ -814,10 +814,54 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         _ensure_sensitive_checkbox_unchecked(page, timeout_ms=min(timeout_ms, 10000), image_path=image_path)
 
         def _click_save() -> None:
+            save_button_visible = page.locator("#basic button[type='submit'].ant-btn-primary:visible")
+            save_button = save_button_visible.first if save_button_visible.count() > 0 else page.locator(
+                "#basic button[type='submit'].ant-btn-primary"
+            ).first
+            if save_button.count() <= 0:
+                raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
+
+            disabled_before = False
             try:
-                page.get_by_role("button", name="Save").click(timeout=timeout_ms)
-            except PlaywrightTimeoutError:
-                page.locator("button[type='submit'].ant-btn-primary").first.click(timeout=timeout_ms)
+                disabled_before = bool(save_button.is_disabled())
+            except Exception:
+                disabled_before = False
+            _log_flow_step("vendor_upload", "save_button_state", "ok", disabled=disabled_before)
+
+            if disabled_before:
+                page.wait_for_timeout(800)
+                try:
+                    disabled_before = bool(save_button.is_disabled())
+                except Exception:
+                    disabled_before = False
+                _log_flow_step("vendor_upload", "save_button_state_retry", "ok", disabled=disabled_before)
+                if disabled_before:
+                    raise UploadImageError("Nut Save dang bi disable tren Vendor Tool.")
+
+            try:
+                save_button.scroll_into_view_if_needed(timeout=5000)
+            except Exception:
+                pass
+
+            try:
+                save_button.click(timeout=5000)
+                return
+            except Exception:
+                pass
+
+            try:
+                save_button.click(timeout=3000, force=True)
+                return
+            except Exception:
+                pass
+
+            page.evaluate(
+                """() => {
+                    const root = document.querySelector('#basic');
+                    const btn = root ? root.querySelector("button[type='submit'].ant-btn-primary") : null;
+                    if (btn) btn.click();
+                }"""
+            )
 
         upload_response_payload: dict[str, Any] = {}
         upload_response_status = 0
