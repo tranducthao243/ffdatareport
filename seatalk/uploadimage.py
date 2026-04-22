@@ -23,6 +23,7 @@ LOGGER = logging.getLogger("seatalk.uploadimage")
 DEFAULT_IMAGE_STORE_PATH = Path("outputs/seatalk_private_images.json")
 DEFAULT_VENDOR_UPLOAD_URL = "https://vendors.garena.vn/upload-tool"
 DEFAULT_VENDOR_PUBLIC_URL_PREFIX = "https://files.garena.vn/garena-social/public/"
+DEFAULT_VENDOR_PUBLIC_URL_BASE = "https://files.garena.vn/"
 DEFAULT_REMOVEBG_SPACE_ID = "amirgame197/Remove-Background"
 DEFAULT_REMOVEBG_API_NAME = "/predict"
 DEFAULT_SEATALK_IMAGE_MAX_BYTES = 3_600_000
@@ -555,7 +556,9 @@ def _fetch_vendor_graphql_files(page) -> list[dict[str, str]]:
 
 def _normalize_public_url(url: str, *, public_url_prefix: str) -> str:
     clean = str(url or "").strip()
-    if not clean.startswith(public_url_prefix):
+    if not clean.startswith(DEFAULT_VENDOR_PUBLIC_URL_BASE):
+        return ""
+    if "/public/" not in clean:
         return ""
     return clean.split("?", 1)[0].strip()
 
@@ -633,7 +636,7 @@ def _pick_vendor_row_after_save(
     public_url_prefix: str,
     owner_email: str,
     uploaded_filename_token: str,
-) -> tuple[str, list[dict[str, str]], list[str]]:
+) -> tuple[str, str, list[dict[str, str]], list[str]]:
     filename_matches: list[dict[str, str]] = []
     new_url_rows: list[dict[str, str]] = []
 
@@ -652,7 +655,7 @@ def _pick_vendor_row_after_save(
 
     if filename_matches:
         selected = _normalize_public_url(filename_matches[0].get("file", ""), public_url_prefix=public_url_prefix)
-        return selected, filename_matches, [
+        return selected, "filename_match", filename_matches, [
             _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
             for row in new_url_rows
             if _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
@@ -664,7 +667,7 @@ def _pick_vendor_row_after_save(
         if _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
     ]
     selected = candidate_new_urls[0] if candidate_new_urls else ""
-    return selected, filename_matches, candidate_new_urls
+    return selected, ("diff_match" if selected else ""), filename_matches, candidate_new_urls
 
 
 def _is_upload_file_tool_response(response) -> bool:
@@ -1030,6 +1033,7 @@ def upload_image_to_vendor_tool(
         deadline = time.monotonic() + (result_timeout_ms / 1000)
         latest_rows: list[dict[str, str]] = existing_rows
         final_url = ""
+        final_source = ""
         poll_attempt = 0
         candidate_rows_by_filename: list[dict[str, str]] = []
         candidate_new_urls: list[str] = []
@@ -1048,7 +1052,7 @@ def upload_image_to_vendor_tool(
                 len(latest_rows),
                 poll_attempt,
             )
-            final_url, candidate_rows_by_filename, candidate_new_urls = _pick_vendor_row_after_save(
+            final_url, final_source, candidate_rows_by_filename, candidate_new_urls = _pick_vendor_row_after_save(
                 latest_rows,
                 before_urls=existing_urls,
                 public_url_prefix=public_url_prefix,
@@ -1079,12 +1083,16 @@ def upload_image_to_vendor_tool(
 
     LOGGER.info("graphql_upload_response_matched=%s", "ok" if matched_graphql_upload["matched"] else "missed")
     if not final_url.startswith(public_url_prefix):
+        if not _normalize_public_url(final_url, public_url_prefix=public_url_prefix):
+            final_url = ""
+    if not final_url:
         LOGGER.info("vendor_upload_failed_after_polling=ok")
         _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=upload_target_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", upload_target_path)
         raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
 
     LOGGER.info("selected_final_url=%s", final_url)
+    LOGGER.info("selected_final_source=%s", final_source or "-")
     LOGGER.info("vendor_upload_success_via_snapshot_diff=ok | final_url=%s", final_url)
     _log_flow_step("vendor_upload", "finalize_public_url", "ok", final_url=final_url)
     LOGGER.info("Vendor result URL found | url=%s", final_url)
