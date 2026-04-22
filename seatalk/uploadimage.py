@@ -256,6 +256,17 @@ def _normalize_vendor_filename(value: str) -> str:
     return Path(str(value or "").strip()).name.lower()
 
 
+def _wait_for_vendor_table_rows(page, *, timeout_ms: int) -> list[dict[str, str]]:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    latest_rows: list[dict[str, str]] = []
+    while time.monotonic() < deadline:
+        latest_rows = _extract_vendor_table_rows(page)
+        if any(row.get("file_url") or row.get("created_at") for row in latest_rows):
+            return latest_rows
+        page.wait_for_timeout(500)
+    return latest_rows
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -469,38 +480,20 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Upload input not found on vendor tool page.")
 
-        existing_rows = _extract_vendor_table_rows(page)
+        existing_rows = _wait_for_vendor_table_rows(page, timeout_ms=min(timeout_ms, 8000))
         existing_urls = [
             row["file_url"]
             for row in existing_rows
             if row.get("file_url", "").startswith(public_url_prefix)
         ]
         existing_row_count = len(existing_rows)
+        existing_top_row = existing_rows[0] if existing_rows else {"file_url": "", "file_name": "", "created_at": ""}
         LOGGER.info(
             "Vendor URLs before save | image_path=%s | row_count=%s | rows=%s",
             image_path,
             existing_row_count,
             existing_rows,
         )
-
-        upload_response_urls: list[str] = []
-
-        def _capture_upload_response(response: Any) -> None:
-            try:
-                request = response.request
-                resource_type = getattr(request, "resource_type", "")
-                if resource_type not in {"fetch", "xhr"}:
-                    return
-                if response.status < 200 or response.status >= 300:
-                    return
-                body_text = response.text()
-            except Exception:
-                return
-            for url in _extract_public_urls(body_text, public_url_prefix=public_url_prefix):
-                if url not in upload_response_urls:
-                    upload_response_urls.append(url)
-
-        page.on("response", _capture_upload_response)
 
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
@@ -521,7 +514,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 image_path,
             )
             page.wait_for_timeout(1500)
-        LOGGER.info("Vendor upload success | image_path=%s | upload_response_urls=%s", image_path, upload_response_urls)
+        LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
         checkbox = page.locator("input#basic_isSensitive").first
         if checkbox.count() > 0:
@@ -543,19 +536,6 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             except Exception:
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
-        captured_response_urls: list[str] = []
-
-        def _capture_response(response: Any) -> None:
-            try:
-                body_text = response.text()
-            except Exception:
-                return
-            for url in _extract_public_urls(body_text, public_url_prefix=public_url_prefix):
-                if url not in captured_response_urls:
-                    captured_response_urls.append(url)
-
-        page.on("response", _capture_response)
-
         try:
             try:
                 page.get_by_role("button", name="Save").click(timeout=timeout_ms)
@@ -576,45 +556,35 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         deadline = time.monotonic() + (result_timeout_ms / 1000)
         final_candidates: list[dict[str, str]] = []
         final_row_count = existing_row_count
-        expected_file_name = _normalize_vendor_filename(image_path.name)
         while time.monotonic() < deadline:
             try:
                 page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
             except PlaywrightTimeoutError:
                 LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
-            current_rows = _extract_vendor_table_rows(page)
+            current_rows = _wait_for_vendor_table_rows(page, timeout_ms=3000)
             current_row_count = len(current_rows)
-            response_new_urls = [url for url in captured_response_urls if url not in existing_urls]
-            table_new_rows = [
-                row
-                for row in current_rows
-                if row.get("file_url", "").startswith(public_url_prefix)
-                and row.get("file_url", "") not in existing_urls
-            ]
-            matching_name_rows = [
-                row
-                for row in table_new_rows
-                if _normalize_vendor_filename(row.get("file_name", "")) == expected_file_name
-            ]
+            current_top_row = current_rows[0] if current_rows else {"file_url": "", "file_name": "", "created_at": ""}
             final_candidates = []
-            for row in matching_name_rows or table_new_rows:
-                if row not in final_candidates:
-                    final_candidates.append(row)
-            if response_new_urls:
-                final_candidates = [
-                    row for row in final_candidates if row.get("file_url", "") in response_new_urls
-                ] or final_candidates
+            if (
+                current_top_row.get("file_url", "").startswith(public_url_prefix)
+                and current_top_row.get("file_url", "") not in existing_urls
+                and (
+                    current_top_row.get("created_at", "") != existing_top_row.get("created_at", "")
+                    or current_top_row.get("file_url", "") != existing_top_row.get("file_url", "")
+                )
+            ):
+                final_candidates.append(current_top_row)
             if len(final_candidates) == 1:
                 final_row_count = current_row_count
                 break
             page.wait_for_timeout(1000)
 
         LOGGER.info(
-            "Vendor URLs after save | image_path=%s | row_count=%s | new_rows=%s | response_urls=%s",
+            "Vendor URLs after save | image_path=%s | row_count=%s | top_before=%s | new_rows=%s",
             image_path,
             final_row_count,
+            existing_top_row,
             final_candidates,
-            captured_response_urls,
         )
         browser.close()
 
