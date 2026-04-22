@@ -694,6 +694,37 @@ def _is_upload_file_tool_response(response) -> bool:
     return False
 
 
+def _extract_graphql_request_details(request) -> dict[str, Any]:
+    operation_name = ""
+    variables: dict[str, Any] = {}
+    try:
+        payload = request.post_data_json
+        if isinstance(payload, dict):
+            operation_name = str(payload.get("operationName") or "").strip()
+            if isinstance(payload.get("variables"), dict):
+                variables = payload.get("variables") or {}
+    except Exception:
+        payload = None
+    if not operation_name:
+        try:
+            post_data = str(request.post_data or "")
+        except Exception:
+            post_data = ""
+        if "uploadFileTool" in post_data:
+            operation_name = "uploadFileTool"
+        elif "getMyFilesUploadTool" in post_data:
+            operation_name = "getMyFilesUploadTool"
+    input_payload = variables.get("input") if isinstance(variables, dict) else {}
+    is_sensitive = ""
+    if isinstance(input_payload, dict) and "isSensitive" in input_payload:
+        is_sensitive = input_payload.get("isSensitive")
+    return {
+        "operation_name": operation_name,
+        "variables": variables,
+        "is_sensitive": is_sensitive,
+    }
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -988,15 +1019,52 @@ def upload_image_to_vendor_tool(
             raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
 
         matched_graphql_upload = {"matched": False}
+        after_save_started = {"value": False}
+
+        def _request_listener(request):
+            if not after_save_started["value"]:
+                return
+            if "/graphql" not in str(request.url or ""):
+                return
+            details = _extract_graphql_request_details(request)
+            LOGGER.info(
+                "graphql_request_operation=%s | graphql_request_variables=%s",
+                details["operation_name"] or "-",
+                details["variables"],
+            )
+            if details["operation_name"] in {"uploadFileTool", "getMyFilesUploadTool"}:
+                LOGGER.info(
+                    "graphql_request_isSensitive=%s | graphql_request_operation=%s",
+                    details["is_sensitive"] if details["is_sensitive"] != "" else "-",
+                    details["operation_name"] or "-",
+                )
 
         def _response_listener(response):
+            if not after_save_started["value"]:
+                return
+            if "/graphql" not in str(response.url or ""):
+                return
+            request_details = _extract_graphql_request_details(response.request)
+            operation_name = request_details["operation_name"] or "-"
+            if request_details["operation_name"] in {"uploadFileTool", "getMyFilesUploadTool"}:
+                try:
+                    response_body = response.text()
+                except Exception as exc:
+                    response_body = f"<unavailable: {exc}>"
+                LOGGER.info(
+                    "graphql_response_body=%s | graphql_request_operation=%s",
+                    response_body,
+                    operation_name,
+                )
             if _is_upload_file_tool_response(response):
                 matched_graphql_upload["matched"] = True
                 LOGGER.info("graphql_upload_response_matched=ok | url=%s", response.url)
 
+        page.on("request", _request_listener)
         page.on("response", _response_listener)
         try:
             LOGGER.info("save_button_js_click_started=ok")
+            after_save_started["value"] = True
             clicked = bool(
                 page.evaluate(
                     """() => {
