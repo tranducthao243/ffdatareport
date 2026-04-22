@@ -174,6 +174,15 @@ def _extract_public_urls(page_content: str, *, public_url_prefix: str) -> list[s
     return results
 
 
+def _extract_top_row_public_url(page, *, public_url_prefix: str) -> str:
+    row = page.locator("tbody tr").first
+    if row.count() <= 0:
+        return ""
+    html = row.inner_html()
+    urls = _extract_public_urls(html, public_url_prefix=public_url_prefix)
+    return urls[0] if urls else ""
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -340,8 +349,35 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Upload input not found on vendor tool page.")
 
+        existing_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+        existing_top_url = _extract_top_row_public_url(page, public_url_prefix=public_url_prefix)
+        existing_row_count = page.locator("tbody tr").count()
+        LOGGER.info(
+            "Vendor URLs before save | image_path=%s | row_count=%s | top_url=%s | urls=%s",
+            image_path,
+            existing_row_count,
+            existing_top_url or "-",
+            existing_urls,
+        )
+
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
+        try:
+            page.wait_for_function(
+                """() => {
+                    const uploading = document.querySelectorAll('.ant-upload-list-item-uploading').length;
+                    const done = document.querySelectorAll('.ant-upload-list-item-done').length;
+                    return uploading === 0 && done > 0;
+                }""",
+                timeout=timeout_ms,
+            )
+            LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
+        except PlaywrightTimeoutError:
+            LOGGER.warning(
+                "Vendor upload component did not expose a done state before timeout; continuing cautiously | image_path=%s",
+                image_path,
+            )
+            page.wait_for_timeout(1500)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
         checkbox = page.locator("input[type='checkbox']").first
@@ -353,7 +389,6 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             except Exception:
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
-        existing_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
         try:
             page.get_by_role("button", name="Save").click(timeout=timeout_ms)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
@@ -362,56 +397,49 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Save button was not clickable.") from exc
 
-        filename_tokens = _filename_match_tokens(image_path)
         LOGGER.info(
-            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s | filename_tokens=%s",
+            "Waiting for vendor result URL | image_path=%s | timeout_ms=%s | existing_urls=%s",
             image_path,
             result_timeout_ms,
             len(existing_urls),
-            filename_tokens,
         )
         deadline = time.monotonic() + (result_timeout_ms / 1000)
         new_urls: list[str] = []
-        matched_row_found = False
+        final_top_url = ""
+        final_row_count = existing_row_count
         while time.monotonic() < deadline:
-            row_match = None
-            for token in filename_tokens:
-                candidate = page.locator("tbody tr", has_text=token).last
-                if candidate.count() > 0:
-                    row_match = candidate
-                    break
-            if row_match is not None:
-                row_html = row_match.inner_html()
-                row_urls = _extract_public_urls(row_html, public_url_prefix=public_url_prefix)
-                new_urls = [url for url in row_urls if url not in existing_urls]
-                if new_urls:
-                    matched_row_found = True
-                    break
-            if int((deadline - time.monotonic()) * 1000) > 1500:
-                try:
-                    page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
-                except PlaywrightTimeoutError:
-                    LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
+            try:
+                page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
+            current_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
+            current_top_url = _extract_top_row_public_url(page, public_url_prefix=public_url_prefix)
+            current_row_count = page.locator("tbody tr").count()
+            new_urls = [url for url in current_urls if url not in existing_urls]
+            if (
+                current_top_url
+                and current_top_url not in existing_urls
+                and current_top_url != existing_top_url
+                and current_row_count >= existing_row_count
+            ):
+                final_top_url = current_top_url
+                final_row_count = current_row_count
+                break
             page.wait_for_timeout(1000)
 
-        if matched_row_found and new_urls:
-            LOGGER.info(
-                "Vendor result row matched uploaded file | image_path=%s | urls=%s",
-                image_path,
-                new_urls,
-            )
-        else:
-            LOGGER.warning(
-                "Vendor result row with uploaded file did not produce a new public URL | image_path=%s | timeout_ms=%s",
-                image_path,
-                result_timeout_ms,
-            )
+        LOGGER.info(
+            "Vendor URLs after save | image_path=%s | row_count=%s | top_url=%s | new_urls=%s",
+            image_path,
+            final_row_count,
+            final_top_url or "-",
+            new_urls,
+        )
         browser.close()
 
-    final_url = (new_urls or [""])[0]
+    final_url = final_top_url
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
-        raise UploadImageError("Da bam Save nhung khong thay dong ket qua khop voi file vua upload tren Vendor Tool.")
+        raise UploadImageError("Da bam Save nhung khong thay top row moi voi public URL moi tren Vendor Tool.")
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
 
@@ -419,4 +447,10 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
 def send_seatalk_text_reply(client: SeaTalkClient, content: str) -> dict[str, Any]:
     result = client.send_text(content)
     LOGGER.info("Seatalk reply success | content_preview=%s", content[:120].replace("\n", " "))
+    return result
+
+
+def send_seatalk_image_reply(client: SeaTalkClient, image_path: Path) -> dict[str, Any]:
+    result = client.send_image_path(image_path)
+    LOGGER.info("Seatalk image reply success | image_path=%s | bytes=%s", image_path, image_path.stat().st_size)
     return result

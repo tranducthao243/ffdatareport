@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -66,6 +68,21 @@ class SeaTalkClient:
 
     def send_interactive(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self.send_message(payload)
+
+    def send_image_bytes(self, content: bytes) -> dict[str, Any]:
+        encoded = base64.b64encode(content).decode("ascii")
+        return self.send_message(
+            {
+                "tag": "image",
+                "image_base64": {
+                    "content": encoded,
+                },
+            }
+        )
+
+    def send_image_path(self, path: str | Path) -> dict[str, Any]:
+        file_path = Path(path)
+        return self.send_image_bytes(file_path.read_bytes())
 
     def set_typing_status(self) -> dict[str, Any]:
         token = self.token or self.get_app_access_token()

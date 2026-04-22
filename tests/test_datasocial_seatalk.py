@@ -1,4 +1,5 @@
 import unittest
+import base64
 from unittest.mock import Mock, patch
 
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
@@ -351,6 +352,27 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertTrue(args[0].endswith("/messaging/v2/single_chat_typing"))
         self.assertEqual(kwargs["json"]["employee_code"], "e_123")
         self.assertEqual(kwargs["json"]["thread_id"], "message-1")
+
+    def test_send_image_bytes_uses_image_base64_message(self):
+        client = SeaTalkClient(
+            SeaTalkSettings(
+                app_id="app",
+                app_secret="secret",
+                employee_code="e_123",
+            )
+        )
+        client.token = "token"
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {"code": 0}
+        client.session.post = Mock(return_value=response)
+
+        client.send_image_bytes(b"png-bytes")
+
+        _, kwargs = client.session.post.call_args
+        self.assertEqual(kwargs["json"]["message"]["tag"], "image")
+        content = kwargs["json"]["message"]["image_base64"]["content"]
+        self.assertEqual(base64.b64decode(content.encode("ascii")), b"png-bytes")
 
     @patch("seatalk.sender.build_seatalk_client")
     def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):

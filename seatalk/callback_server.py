@@ -45,6 +45,7 @@ from .uploadimage import (
     get_latest_unprocessed_image_for_user,
     mark_image_processed_for_user,
     remove_background_with_space,
+    send_seatalk_image_reply,
     send_seatalk_text_reply,
     store_latest_image_for_user,
     summarize_upload_error,
@@ -559,12 +560,13 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "hoặc một câu hỏi dữ liệu cụ thể.*"
                 )
 
-            private_client.send_text(reply_text)
-            LOGGER.info(
-                "Seatalk private command reply sent | employee_code=%s | command=%s",
-                employee_code,
-                command,
-            )
+            if reply_text:
+                private_client.send_text(reply_text)
+                LOGGER.info(
+                    "Seatalk private command reply sent | employee_code=%s | command=%s",
+                    employee_code,
+                    command,
+                )
 
         def _handle_private_image_message(self, callback_context: dict[str, str]) -> None:
             employee_code = callback_context["employee_code"]
@@ -669,8 +671,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 if employee_code in active_uploads:
                     LOGGER.info("Seatalk removebg already in progress | employee_code=%s", employee_code)
                     return (
-                        "**áº¢nh gáº§n nháº¥t cá»§a báº¡n Ä‘ang Ä‘Æ°á»£c xá»­ lÃ½**\n"
-                        "*Vui lÃ²ng chá» bot hoÃ n táº¥t rá»“i thá»­ láº¡i náº¿u cáº§n.*"
+                        "**Anh gan nhat cua ban dang duoc xu ly**\n"
+                        "*Vui long cho bot hoan tat roi thu lai neu can.*"
                     )
                 active_uploads.add(employee_code)
 
@@ -682,8 +684,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 with private_message_lock:
                     active_uploads.discard(employee_code)
                 return (
-                    "**ChÆ°a cÃ³ áº£nh nÃ o Ä‘á»ƒ tÃ¡ch ná»n**\n"
-                    "*HÃ£y gá»­i má»™t áº£nh cho bot trÆ°á»›c, sau Ä‘Ã³ gÃµ `removebg`.*"
+                    "**Chua co anh nao de tach nen**\n"
+                    "*Hay gui mot anh cho bot truoc, sau do go `removebg`.*"
                 )
 
             try:
@@ -694,31 +696,34 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     filename_hint=str(image_entry.get("message_id") or employee_code),
                 )
                 output_path = remove_background_with_space(image_path)
-                final_url = upload_image_to_vendor_tool(output_path)
+
+                private_client = build_seatalk_client(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    employee_code=employee_code,
+                )
+                send_seatalk_image_reply(private_client, output_path)
             except UploadImageError as exc:
                 LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
                 with private_message_lock:
                     active_uploads.discard(employee_code)
                 return (
-                    "**TÃ¡ch ná»n áº£nh tháº¥t báº¡i**\n"
-                    f"*Chi tiáº¿t: {summarize_upload_error(exc)}*"
+                    "**Tach nen anh that bai**\n"
+                    f"*Chi tiet: {summarize_upload_error(exc)}*"
                 )
             except Exception as exc:
                 LOGGER.exception("Unexpected remove background failure | employee_code=%s", employee_code)
                 with private_message_lock:
                     active_uploads.discard(employee_code)
                 return (
-                    "**TÃ¡ch ná»n áº£nh tháº¥t báº¡i**\n"
-                    f"*Chi tiáº¿t: {summarize_upload_error(exc)}*"
+                    "**Tach nen anh that bai**\n"
+                    f"*Chi tiet: {summarize_upload_error(exc)}*"
                 )
 
             mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
             with private_message_lock:
                 active_uploads.discard(employee_code)
-            return (
-                "**Táº¡o áº£nh tÃ¡ch ná»n thÃ nh cÃ´ng**\n"
-                f"- Link áº£nh: {final_url}"
-            )
+            return ""
 
         def _build_report_text(self, report_code: str) -> str:
             package = build_report_package_by_code(
@@ -801,3 +806,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
