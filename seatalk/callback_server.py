@@ -596,7 +596,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 (
                     "**Da nhan anh gan nhat cua ban**\n"
                     "*Go `uploadimage` de tai anh len web noi bo va nhan link ket qua.*\n"
-                    "*Go `removebg` de tai anh len web tach nen va tra lai anh ket qua.*"
+                    "*Go `removebg` de tach nen anh va nhan link PNG ket qua.*"
                 ),
             )
 
@@ -845,5 +845,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
