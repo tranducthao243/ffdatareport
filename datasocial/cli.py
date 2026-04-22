@@ -10,6 +10,8 @@ import re
 import sys
 
 from app.pipeline import build_configured_reports, build_store_from_export
+from seatalk.alerts import send_superadmin_alerts
+from seatalk.identity import get_superadmins, load_user_directory
 from .analysis import build_report
 from .config import DEFAULT_APP_ID, DEFAULT_PER_PAGE, Settings
 from .display import print_posts
@@ -208,6 +210,11 @@ def parse_admin_employee_codes() -> list[str]:
     return results
 
 
+def load_superadmin_users() -> list[dict[str, object]]:
+    path = Path(os.getenv("SEATALK_USERS_CONFIG", "config/users.json"))
+    return get_superadmins(load_user_directory(path))
+
+
 def persist_rendered_packages(rendered_dir: Path | None, payload: dict) -> list[str]:
     if not rendered_dir:
         return []
@@ -356,6 +363,7 @@ def main() -> int:
                 seatalk_app_id=settings.seatalk_app_id,
                 seatalk_app_secret=settings.seatalk_app_secret,
                 seatalk_admin_employee_codes=parse_admin_employee_codes(),
+                seatalk_superadmin_users=load_superadmin_users(),
                 history_path=args.save_history,
                 history_dir=args.load_history_dir,
             )
@@ -470,16 +478,40 @@ def main() -> int:
     except DatasocialError as exc:
         update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
         write_status(args.status_file, status)
+        if settings.seatalk_app_id and settings.seatalk_app_secret:
+            send_superadmin_alerts(
+                app_id=settings.seatalk_app_id,
+                app_secret=settings.seatalk_app_secret,
+                superadmins=load_superadmin_users(),
+                title="Daily fetch/send failed",
+                body=f"Phase: {status.get('phase', '-')}\nError: {type(exc).__name__}: {exc}",
+            )
         LOGGER.exception("DatasocialError")
         parser.exit(status=1, message=f"datasocial error: {exc}\n")
     except OSError as exc:
         update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
         write_status(args.status_file, status)
+        if settings.seatalk_app_id and settings.seatalk_app_secret:
+            send_superadmin_alerts(
+                app_id=settings.seatalk_app_id,
+                app_secret=settings.seatalk_app_secret,
+                superadmins=load_superadmin_users(),
+                title="Daily fetch/send failed",
+                body=f"Phase: {status.get('phase', '-')}\nError: {type(exc).__name__}: {exc}",
+            )
         LOGGER.exception("OSError")
         parser.exit(status=1, message=f"datasocial file error: {exc}\n")
     except Exception as exc:
         update_status(status, "failed", exit_code=1, error=f"{type(exc).__name__}: {exc}")
         write_status(args.status_file, status)
+        if settings.seatalk_app_id and settings.seatalk_app_secret:
+            send_superadmin_alerts(
+                app_id=settings.seatalk_app_id,
+                app_secret=settings.seatalk_app_secret,
+                superadmins=load_superadmin_users(),
+                title="Daily fetch/send failed",
+                body=f"Phase: {status.get('phase', '-')}\nError: {type(exc).__name__}: {exc}",
+            )
         LOGGER.exception("Unexpected error")
         raise
 

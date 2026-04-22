@@ -23,6 +23,8 @@ jobs:
       DATASOCIAL_APP_SLUG: ffvn
       DATASOCIAL_TIMEOUT: 300
       DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
+      SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
+      SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

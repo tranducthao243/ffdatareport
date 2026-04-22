@@ -8,6 +8,7 @@ from datasocial.exceptions import DatasocialError
 from normalize import build_sqlite_store
 from report import build_report_packages, render_seatalk_package
 from seatalk import build_interactive_actions, build_seatalk_client, send_report_packages
+from seatalk.alerts import send_superadmin_alerts
 
 from .config_loader import (
     format_validation_errors,
@@ -16,6 +17,7 @@ from .config_loader import (
     resolve_group_target,
     validate_reporting_config,
 )
+from .charting import build_kol_30d_chart
 from .history import apply_history_deltas, build_daily_snapshot, save_daily_snapshot
 from .health import build_health_snapshot, format_health_alert
 
@@ -43,6 +45,7 @@ def build_configured_reports(
     seatalk_app_id: str = "",
     seatalk_app_secret: str = "",
     seatalk_admin_employee_codes: list[str] | None = None,
+    seatalk_superadmin_users: list[dict[str, Any]] | None = None,
     history_path: Path | None = None,
     history_dir: Path | None = None,
 ) -> dict[str, Any]:
@@ -94,6 +97,14 @@ def build_configured_reports(
         package["renderedText"] = render_seatalk_package(package)
         package["sectionCodes"] = [section["code"] for section in package["sections"]]
         package["sectionCount"] = len(package["sections"])
+        if "TOPE" in package["sectionCodes"]:
+            package["chartPath"] = str(
+                build_kol_30d_chart(
+                    db_path,
+                    title=f"{package['title']} - Daily Views 30 Days",
+                    now=now,
+                )
+            )
 
     health_snapshot = build_health_snapshot(
         payload,
@@ -104,6 +115,7 @@ def build_configured_reports(
     )
 
     send_results: list[dict[str, Any]] = []
+    alert_results: list[dict[str, Any]] = []
     if send:
         if health_snapshot["blockSend"]:
             send_results = [
@@ -144,12 +156,42 @@ def build_configured_reports(
                             "message": str(exc),
                         }
                     )
+            if seatalk_superadmin_users:
+                alert_results.extend(
+                    send_superadmin_alerts(
+                        app_id=seatalk_app_id,
+                        app_secret=seatalk_app_secret,
+                        superadmins=seatalk_superadmin_users,
+                        title="Daily send blocked",
+                        body=format_health_alert(health_snapshot),
+                    )
+                )
         else:
             send_results = send_report_packages(
                 packages,
                 app_id=seatalk_app_id,
                 app_secret=seatalk_app_secret,
             )
+            failed_results = [item for item in send_results if item["status"] in {"failed", "interactive_failed"}]
+            if seatalk_superadmin_users and (health_snapshot.get("issues") or failed_results):
+                alert_lines = []
+                if health_snapshot.get("issues"):
+                    alert_lines.append(format_health_alert(health_snapshot))
+                if failed_results:
+                    alert_lines.append("Group send failures:")
+                    for item in failed_results:
+                        alert_lines.append(
+                            f"- {item.get('groupName', '-')} / {item.get('reportCode', '-')}: {item.get('message') or item.get('reason') or item.get('status')}"
+                        )
+                alert_results.extend(
+                    send_superadmin_alerts(
+                        app_id=seatalk_app_id,
+                        app_secret=seatalk_app_secret,
+                        superadmins=seatalk_superadmin_users,
+                        title="Daily send alert",
+                        body="\n".join(alert_lines).strip(),
+                    )
+                )
 
     package_summaries = [
         {
@@ -188,6 +230,7 @@ def build_configured_reports(
         },
         "packages": packages,
         "sendResults": send_results,
+        "alertResults": alert_results,
     }
     if history_path:
         save_daily_snapshot(build_daily_snapshot(payload, now=now), history_path)

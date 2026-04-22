@@ -77,6 +77,8 @@ def classify_private_command(text: str) -> str:
         return "web"
     if normalized.startswith("hashtag"):
         return "hashtag"
+    if normalized == "kol" or normalized.startswith("kol "):
+        return "kol"
     if normalized in {"shortlink", "link ngan", "tao shortlink", "rut gon link"}:
         return "shortlink"
     if normalized in {"imagelink", "uploadimage", "upload anh", "gui anh len web", "up anh"}:

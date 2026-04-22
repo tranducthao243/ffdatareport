@@ -23,16 +23,17 @@ from app.data_chat import answer_data_question
 from app.health import (
     build_health_snapshot,
     classify_private_command,
-    format_hashtag_report,
     format_data_report,
     format_health_report,
     format_scope_report,
 )
+from app.private_reports import format_hashtag_report_v2, format_kol_report
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
 from datasocial.seatalk import SeaTalkError
 
 from .auth import build_seatalk_client
+from .identity import build_unified_user, get_superadmins, load_user_directory
 from .callbacks import (
     SeatalkCallbackError,
     build_callback_context,
@@ -65,14 +66,20 @@ PRIVATE_FUTURE_FEATURE_MESSAGE = (
 
 
 def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
+    directory = runtime.get("user_directory") or []
+    if not directory and not (
+        runtime.get("admin_employee_codes") or runtime.get("admin_emails") or runtime.get("admin_seatalk_ids")
+    ):
+        return True
+    unified_user = build_unified_user(callback_context, directory)
+    if unified_user["role"] in {"admin", "superadmin"}:
+        return True
+    employee_code = unified_user["employee_code"]
+    email = unified_user["email"]
+    seatalk_id = unified_user["seatalk_user_id"]
     admin_codes = set(runtime.get("admin_employee_codes") or [])
     admin_emails = set(runtime.get("admin_emails") or [])
     admin_seatalk_ids = set(runtime.get("admin_seatalk_ids") or [])
-    if not (admin_codes or admin_emails or admin_seatalk_ids):
-        return True
-    employee_code = callback_context["employee_code"]
-    email = callback_context["email"].lower()
-    seatalk_id = callback_context["seatalk_id"]
     return (
         employee_code in admin_codes
         or (email and email in admin_emails)
@@ -138,6 +145,7 @@ def verify_signature(raw_body: bytes, signing_secret: str, received_signature: s
 def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     preset = load_preset(args.preset)
     preset_data = preset.data
+    user_directory = load_user_directory(Path(os.getenv("SEATALK_USERS_CONFIG", "config/users.json")))
     admin_codes: list[str] = []
     for raw in (os.getenv("SEATALK_ADMIN_EMPLOYEE_CODES", ""), os.getenv("SEATALK_ADMIN_EMPLOYEE_CODE", "")):
         for token in raw.replace(";", ",").split(","):
@@ -178,6 +186,9 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "admin_emails": admin_emails,
         "admin_seatalk_ids": admin_seatalk_ids,
         "admin_contact_email": os.getenv("SEATALK_ADMIN_CONTACT_EMAIL", "ducthao.tran@garena.vn").strip(),
+        "user_directory": user_directory,
+        "superadmin_users": get_superadmins(user_directory),
+        "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
     }
 
 
@@ -409,6 +420,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 "Seatalk private message context | %s",
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
             )
+            LOGGER.info(
+                "Seatalk unified user | %s",
+                json.dumps(
+                    build_unified_user(callback_context, runtime.get("user_directory") or []),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ),
+            )
             employee_code = callback_context["employee_code"]
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in private message event.")
@@ -515,7 +534,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
-                reply_text = format_hashtag_report(runtime["db_path"], message_text)
+                reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
+            elif command == "kol":
+                reply_text = format_kol_report(
+                    runtime["db_path"],
+                    message_text,
+                    mapping_path=runtime["kol_mapping_path"],
+                    now=datetime.now(),
+                )
             elif command == "imagelink":
                 reply_text = self._handle_uploadimage_command(callback_context)
             elif command == "removebg":
@@ -593,11 +619,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             send_seatalk_text_reply(
                 client,
-                (
-                    "**Da nhan anh gan nhat cua ban**\n"
-                    "*Go `imagelink` de tai anh len web noi bo va nhan link ket qua.*\n"
-                    "*Go `removebg` de tach nen anh va tra lai anh ket qua.*"
-                ),
+                "Đã nhận ảnh gần nhất của bạn.\nGõ 'uploadimage' để tải ảnh lên web nội bộ.\nGõ 'removebg' để tách nền ảnh.",
             )
 
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
@@ -825,6 +847,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 seatalk_app_id=runtime["seatalk_app_id"],
                 seatalk_app_secret=runtime["seatalk_app_secret"],
                 seatalk_admin_employee_codes=runtime["admin_employee_codes"],
+                seatalk_superadmin_users=runtime["superadmin_users"],
             )
 
         def _read_body(self) -> bytes:

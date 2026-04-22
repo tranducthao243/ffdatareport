@@ -1,11 +1,14 @@
 import unittest
 import base64
+import json
 from unittest.mock import Mock, patch
 from PIL import Image
 
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
+from app.private_reports import format_hashtag_report_v2, format_kol_report
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
+from seatalk.identity import UnifiedUser, build_unified_user
 from seatalk.callbacks import (
     build_callback_context,
     extract_click_value,
@@ -44,6 +47,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
     def test_imagelink_command_alias_is_detected(self):
         self.assertEqual(classify_private_command("imagelink"), "imagelink")
         self.assertEqual(classify_private_command("uploadimage"), "imagelink")
+        self.assertEqual(classify_private_command("kol hieu dau da"), "kol")
 
     def test_format_hashtag_report_summarizes_views_by_category(self):
         rows = [
@@ -101,6 +105,146 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             self.assertIn("Khung dữ liệu: `2026-04-17 -> 2026-04-18`", answer)
             self.assertIn("Trend Dance", answer)
             self.assertIn("Roblox", answer)
+
+    def test_format_hashtag_report_v2_lists_top_videos_and_official_share(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "Dance One",
+                "Category": "Trend Dance",
+                "__category_id": "119",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #ob53",
+                "Link": "https://www.tiktok.com/@dance/video/1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            },
+            {
+                "ID": "2",
+                "Platform": "Facebook",
+                "Channel id": "fb-1",
+                "Channel name": "Official One",
+                "Category": "Official",
+                "__category_id": "13",
+                "Post id": "fb-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Official #ob53",
+                "Link": "https://facebook.com/post/1",
+                "Publish time": "2026-04-18 11:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "5",
+                "Duration (second)": "20",
+                "Engagement": "40",
+                "Reaction": "20",
+                "View": "200000",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            answer = format_hashtag_report_v2(db_path, "hashtag ob53")
+
+            self.assertIn("TOP VIDEO NOI BAT (7 NGAY)", answer)
+            self.assertIn("Official contribution:", answer)
+            self.assertIn("Percentage:", answer)
+
+    def test_format_kol_report_aggregates_channels_from_mapping(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Youtube",
+                "Channel id": "yt-1",
+                "Channel name": "KOL One YT",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "yt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #freefire",
+                "Link": "https://youtube.com/watch?v=1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#freefire",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            },
+            {
+                "ID": "2",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "KOL One TT",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 2 #ff",
+                "Link": "https://tiktok.com/@kol/video/1",
+                "Publish time": "2026-04-18 10:00:00",
+                "Hashtag": "#ff",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "300000",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            mapping_path = root / "kols.json"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+            mapping_path.write_text(
+                json.dumps(
+                    {
+                        "kols": [
+                            {
+                                "name": "KOL One",
+                                "aliases": ["kolone"],
+                                "channels": [
+                                    {"platform": "youtube", "channelName": "KOL One YT"},
+                                    {"platform": "tiktok", "channelName": "KOL One TT"},
+                                ],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            answer = format_kol_report(db_path, "kol KOL One", mapping_path=mapping_path)
+
+            self.assertIn("KOL: KOL One", answer)
+            self.assertIn("Tong view:", answer)
+            self.assertIn("TOP hashtag:", answer)
+            self.assertIn("YouTube: KOL One YT", answer)
+
+    def test_build_unified_user_resolves_superadmin_by_email(self):
+        callback_context = {
+            "employee_code": "110677",
+            "email": "ducthao.tran@garena.vn",
+            "seatalk_id": "9306358918",
+        }
+        unified = build_unified_user(
+            callback_context,
+            [UnifiedUser(role="superadmin", employee_code="110677", email="ducthao.tran@garena.vn", seatalk_user_id="9306358918")],
+        )
+        self.assertEqual(unified["role"], "superadmin")
 
     def test_render_seatalk_report_legacy_fallback_keeps_summary(self):
         report = {
@@ -560,6 +704,30 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(client.send_interactive.call_count, 2)
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")
+
+    @patch("seatalk.sender.build_seatalk_client")
+    def test_send_report_packages_sends_chart_when_present(self, mock_build_client):
+        client = Mock()
+        mock_build_client.return_value = client
+        with tempfile.TemporaryDirectory() as tmp:
+            chart_path = Path(tmp) / "chart.png"
+            Image.new("RGB", (10, 10), (255, 255, 255)).save(chart_path, format="PNG")
+            packages = [
+                {
+                    "groupName": "main",
+                    "reportCode": "SO1",
+                    "resolvedGroupId": "group-1",
+                    "renderedText": "Bao cao\nhello",
+                    "title": "Bao cao",
+                    "chartPath": str(chart_path),
+                    "interactiveActions": [],
+                }
+            ]
+
+            result = send_report_packages(packages, app_id="id", app_secret="secret")
+
+            client.send_image_path.assert_called_once()
+            self.assertEqual(result[0]["chartStatus"], "sent")
 
 
 if __name__ == "__main__":
