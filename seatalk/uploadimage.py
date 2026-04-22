@@ -193,6 +193,10 @@ def summarize_upload_error(exc: Exception) -> str:
         return "Playwright browser chua duoc cai day du trong Railway runtime."
     if "website auth failed" in lowered:
         return "Khong dang nhap duoc vao Vendor Tool bang cookie hien tai."
+    if "chua upload xong file vao he thong" in lowered:
+        return "Vendor Tool chua upload xong file vao he thong, nen bot da dung lai truoc khi bam Save."
+    if "khong bo tick duoc" in lowered:
+        return "Bot khong bo duoc o tick du lieu nhay cam tren Vendor Tool."
     if "public url" in lowered:
         return "Khong tim thay link anh public moi sau khi bam Save."
     if "save button was not clickable" in lowered:
@@ -371,6 +375,25 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             existing_urls,
         )
 
+        upload_response_urls: list[str] = []
+
+        def _capture_upload_response(response: Any) -> None:
+            try:
+                request = response.request
+                resource_type = getattr(request, "resource_type", "")
+                if resource_type not in {"fetch", "xhr"}:
+                    return
+                if response.status < 200 or response.status >= 300:
+                    return
+                body_text = response.text()
+            except Exception:
+                return
+            for url in _extract_public_urls(body_text, public_url_prefix=public_url_prefix):
+                if url not in upload_response_urls:
+                    upload_response_urls.append(url)
+
+        page.on("response", _capture_upload_response)
+
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         try:
@@ -382,14 +405,16 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 }""",
                 timeout=timeout_ms,
             )
+            page.wait_for_timeout(1000)
             LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
         except PlaywrightTimeoutError:
-            LOGGER.warning(
-                "Vendor upload component did not expose a done state before timeout; continuing cautiously | image_path=%s",
+            LOGGER.error(
+                "Vendor upload component did not expose a done state before timeout | image_path=%s",
                 image_path,
             )
-            page.wait_for_timeout(1500)
-        LOGGER.info("Vendor upload success | image_path=%s", image_path)
+            browser.close()
+            raise UploadImageError("Vendor Tool chua upload xong file vao he thong, nen bot dung lai truoc khi bam Save.")
+        LOGGER.info("Vendor upload success | image_path=%s | upload_response_urls=%s", image_path, upload_response_urls)
 
         checkbox = page.locator("input#basic_isSensitive").first
         if checkbox.count() > 0:

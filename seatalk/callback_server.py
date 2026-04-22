@@ -242,7 +242,7 @@ def sync_store_from_github_artifact(runtime: dict[str, Any]) -> bool:
 def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
     private_message_lock = threading.Lock()
     handled_private_message_ids: dict[str, str] = {}
-    active_uploads: set[str] = set()
+    active_uploads: set[tuple[str, str]] = set()
 
     class CallbackHandler(BaseHTTPRequestHandler):
         server_version = "SeatalkCallbackServer/1.0"
@@ -600,15 +600,16 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
+            active_job = (employee_code, "uploadimage")
             LOGGER.info("Seatalk uploadimage command received | employee_code=%s", employee_code)
             with private_message_lock:
-                if employee_code in active_uploads:
+                if active_job in active_uploads:
                     LOGGER.info("Seatalk uploadimage already in progress | employee_code=%s", employee_code)
                     return (
                         "**Ảnh gần nhất của bạn đang được xử lý**\n"
                         "*Vui lòng chờ bot hoàn tất rồi thử lại nếu cần.*"
                     )
-                active_uploads.add(employee_code)
+                active_uploads.add(active_job)
 
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
@@ -616,7 +617,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             if not image_entry:
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Chưa có ảnh nào để tải lên**\n"
                     "*Hãy gửi một ảnh cho bot trước, sau đó gõ `uploadimage`.*"
@@ -632,7 +633,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             except Exception as exc:
                 LOGGER.exception("Seatalk image download failure | employee_code=%s", employee_code)
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Tải ảnh từ Seatalk thất bại**\n"
                     f"*Chi tiết: {exc}*"
@@ -643,7 +644,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             except UploadImageError as exc:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
                     f"*Chi tiết: {summarize_upload_error(exc)}*"
@@ -651,7 +652,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             except Exception as exc:
                 LOGGER.exception("Unexpected vendor upload failure | employee_code=%s", employee_code)
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Upload ảnh lên Vendor Tool thất bại**\n"
                     f"*Chi tiết: {summarize_upload_error(exc)}*"
@@ -659,7 +660,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
             with private_message_lock:
-                active_uploads.discard(employee_code)
+                active_uploads.discard(active_job)
             return (
                 "**Upload ảnh thành công**\n"
                 f"- Link ảnh: {final_url}"
@@ -667,15 +668,16 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_removebg_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
+            active_job = (employee_code, "removebg")
             LOGGER.info("Seatalk removebg command received | employee_code=%s", employee_code)
             with private_message_lock:
-                if employee_code in active_uploads:
+                if active_job in active_uploads:
                     LOGGER.info("Seatalk removebg already in progress | employee_code=%s", employee_code)
                     return (
                         "**Anh gan nhat cua ban dang duoc xu ly**\n"
                         "*Vui long cho bot hoan tat roi thu lai neu can.*"
                     )
-                active_uploads.add(employee_code)
+                active_uploads.add(active_job)
 
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
@@ -683,7 +685,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             if not image_entry:
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Chua co anh nao de tach nen**\n"
                     "*Hay gui mot anh cho bot truoc, sau do go `removebg`.*"
@@ -707,7 +709,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             except UploadImageError as exc:
                 LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Tach nen anh that bai**\n"
                     f"*Chi tiet: {summarize_upload_error(exc)}*"
@@ -715,7 +717,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             except Exception as exc:
                 LOGGER.exception("Unexpected remove background failure | employee_code=%s", employee_code)
                 with private_message_lock:
-                    active_uploads.discard(employee_code)
+                    active_uploads.discard(active_job)
                 return (
                     "**Tach nen anh that bai**\n"
                     f"*Chi tiet: {summarize_upload_error(exc)}*"
@@ -723,7 +725,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             mark_image_processed_for_user(get_image_store_path(), employee_code=employee_code)
             with private_message_lock:
-                active_uploads.discard(employee_code)
+                active_uploads.discard(active_job)
             return ""
 
         def _build_report_text(self, report_code: str) -> str:
