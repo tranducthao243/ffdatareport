@@ -937,6 +937,61 @@ def upload_image_to_vendor_tool(
             ]
         )
         page = context.new_page()
+        LOGGER.info("graphql_hook_registered=ok")
+
+        matched_graphql_upload = {"matched": False}
+
+        def _request_listener(request):
+            if "/graphql" not in str(request.url or ""):
+                return
+            details = _extract_graphql_request_details(request)
+            LOGGER.info(
+                "graphql_request_operation=%s | graphql_request_variables=%s",
+                details["operation_name"] or "-",
+                details["variables"],
+            )
+            LOGGER.info(
+                "graphql_request_isSensitive=%s | graphql_request_operation=%s",
+                details["is_sensitive"] if details["is_sensitive"] != "" else "-",
+                details["operation_name"] or "-",
+            )
+
+        def _response_listener(response):
+            if "/graphql" not in str(response.url or ""):
+                return
+            request_details = _extract_graphql_request_details(response.request)
+            operation_name = request_details["operation_name"] or "-"
+            try:
+                response_body = response.text()
+            except Exception as exc:
+                response_body = f"<unavailable: {exc}>"
+            LOGGER.info(
+                "graphql_response_body=%s | graphql_request_operation=%s",
+                response_body,
+                operation_name,
+            )
+            if _is_upload_file_tool_response(response):
+                matched_graphql_upload["matched"] = True
+                LOGGER.info("graphql_upload_response_matched=ok | url=%s", response.url)
+
+        page.on("request", _request_listener)
+        page.on("response", _response_listener)
+
+        def _close_runtime() -> None:
+            LOGGER.info("page_close_started=ok")
+            try:
+                page.wait_for_timeout(300)
+            except Exception:
+                pass
+            try:
+                page.close()
+            except Exception:
+                pass
+            LOGGER.info("browser_close_started=ok")
+            try:
+                browser.close()
+            except Exception:
+                pass
 
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -946,13 +1001,13 @@ def upload_image_to_vendor_tool(
         except PlaywrightTimeoutError as exc:
             _log_flow_step("vendor_upload", "auth_and_open_page", "fail", upload_url=upload_url)
             LOGGER.error("Vendor upload auth failed | url=%s", upload_url)
-            browser.close()
+            _close_runtime()
             raise UploadImageError("Website auth failed or upload area did not appear.") from exc
 
         file_input = page.locator("input[type='file']").first
         if file_input.count() <= 0:
             _log_flow_step("vendor_upload", "find_file_input", "fail", image_path=image_path)
-            browser.close()
+            _close_runtime()
             raise UploadImageError("Upload input not found on vendor tool page.")
         _log_flow_step("vendor_upload", "find_file_input", "ok", image_path=image_path)
 
@@ -1015,56 +1070,10 @@ def upload_image_to_vendor_tool(
         LOGGER.info("save_button_total_count=%s", save_button_total_count)
         LOGGER.info("save_button_visible_count=%s", save_button_visible_count)
         if save_button_visible_count <= 0:
-            browser.close()
+            _close_runtime()
             raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
-
-        matched_graphql_upload = {"matched": False}
-        after_save_started = {"value": False}
-
-        def _request_listener(request):
-            if not after_save_started["value"]:
-                return
-            if "/graphql" not in str(request.url or ""):
-                return
-            details = _extract_graphql_request_details(request)
-            LOGGER.info(
-                "graphql_request_operation=%s | graphql_request_variables=%s",
-                details["operation_name"] or "-",
-                details["variables"],
-            )
-            if details["operation_name"] in {"uploadFileTool", "getMyFilesUploadTool"}:
-                LOGGER.info(
-                    "graphql_request_isSensitive=%s | graphql_request_operation=%s",
-                    details["is_sensitive"] if details["is_sensitive"] != "" else "-",
-                    details["operation_name"] or "-",
-                )
-
-        def _response_listener(response):
-            if not after_save_started["value"]:
-                return
-            if "/graphql" not in str(response.url or ""):
-                return
-            request_details = _extract_graphql_request_details(response.request)
-            operation_name = request_details["operation_name"] or "-"
-            if request_details["operation_name"] in {"uploadFileTool", "getMyFilesUploadTool"}:
-                try:
-                    response_body = response.text()
-                except Exception as exc:
-                    response_body = f"<unavailable: {exc}>"
-                LOGGER.info(
-                    "graphql_response_body=%s | graphql_request_operation=%s",
-                    response_body,
-                    operation_name,
-                )
-            if _is_upload_file_tool_response(response):
-                matched_graphql_upload["matched"] = True
-                LOGGER.info("graphql_upload_response_matched=ok | url=%s", response.url)
-
-        page.on("request", _request_listener)
-        page.on("response", _response_listener)
         try:
             LOGGER.info("save_button_js_click_started=ok")
-            after_save_started["value"] = True
             clicked = bool(
                 page.evaluate(
                     """() => {
@@ -1092,7 +1101,7 @@ def upload_image_to_vendor_tool(
             LOGGER.info("save_button_js_click_done=fail")
             _log_flow_step("vendor_upload", "click_save", "fail", image_path=upload_target_path)
             LOGGER.error("Vendor save click failed | image_path=%s", upload_target_path)
-            browser.close()
+            _close_runtime()
             if isinstance(exc, UploadImageError):
                 raise
             raise UploadImageError("Save button was not clickable.") from exc
@@ -1147,7 +1156,7 @@ def upload_image_to_vendor_tool(
             row_count=len(latest_rows),
             candidates=1 if final_url else 0,
         )
-        browser.close()
+        _close_runtime()
 
     LOGGER.info("graphql_upload_response_matched=%s", "ok" if matched_graphql_upload["matched"] else "missed")
     if not final_url.startswith(public_url_prefix):
