@@ -20,6 +20,7 @@ from seatalk.payloads import build_interactive_group_payload, build_interactive_
 from seatalk.sender import send_report_packages
 from seatalk.uploadimage import (
     _filename_match_tokens,
+    _pick_vendor_row_after_save,
     _pick_new_vendor_url,
     _safe_filename_stem,
     convert_image_to_png,
@@ -345,6 +346,35 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             owner_email="owner@example.com",
         )
         self.assertEqual(selected, "https://files.garena.vn/garena-social/public/2026/4/22/newer-owner.png")
+
+    def test_pick_vendor_row_after_save_prefers_filename_match_and_rejects_wrong_path(self):
+        rows = [
+            {
+                "id": "1",
+                "email": "owner@example.com",
+                "file": "https://files.garena.vn/garena-vendor-system/public/2026/4/22/seatalk-110677-1776876049.1t2bq448fx.png",
+                "createdAt": "2026-04-22T16:41:00.614Z",
+            },
+            {
+                "id": "2",
+                "email": "owner@example.com",
+                "file": "https://files.garena.vn/garena-social/public/2026/4/22/older.png",
+                "createdAt": "2026-04-22T16:39:00.614Z",
+            },
+        ]
+
+        selected, source, filename_matches, candidate_new_urls = _pick_vendor_row_after_save(
+            rows,
+            before_urls={"https://files.garena.vn/garena-social/public/2026/4/22/older.png"},
+            public_url_prefix="https://files.garena.vn/garena-social/public/",
+            owner_email="owner@example.com",
+            uploaded_filename_token="seatalk-110677-1776876049",
+        )
+
+        self.assertEqual(selected, "")
+        self.assertEqual(source, "filename_match_wrong_path")
+        self.assertEqual(len(filename_matches), 1)
+        self.assertEqual(candidate_new_urls, [])
 
     def test_convert_image_to_png_rewrites_webp_output_for_seatalk(self):
         with tempfile.TemporaryDirectory() as tmp:

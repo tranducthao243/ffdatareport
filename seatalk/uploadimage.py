@@ -11,6 +11,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs
 
 import requests
 from PIL import Image
@@ -556,9 +557,7 @@ def _fetch_vendor_graphql_files(page) -> list[dict[str, str]]:
 
 def _normalize_public_url(url: str, *, public_url_prefix: str) -> str:
     clean = str(url or "").strip()
-    if not clean.startswith(DEFAULT_VENDOR_PUBLIC_URL_BASE):
-        return ""
-    if "/public/" not in clean:
+    if not clean.startswith(public_url_prefix):
         return ""
     return clean.split("?", 1)[0].strip()
 
@@ -655,7 +654,8 @@ def _pick_vendor_row_after_save(
 
     if filename_matches:
         selected = _normalize_public_url(filename_matches[0].get("file", ""), public_url_prefix=public_url_prefix)
-        return selected, "filename_match", filename_matches, [
+        source = "filename_match" if selected else "filename_match_wrong_path"
+        return selected, source, filename_matches, [
             _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
             for row in new_url_rows
             if _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
@@ -695,8 +695,17 @@ def _is_upload_file_tool_response(response) -> bool:
 
 
 def _extract_graphql_request_details(request) -> dict[str, Any]:
+    content_type = ""
     operation_name = ""
     variables: dict[str, Any] = {}
+    raw_post_data = ""
+    raw_operations = ""
+    raw_map = ""
+    try:
+        headers = request.headers or {}
+        content_type = str(headers.get("content-type") or headers.get("Content-Type") or "").strip()
+    except Exception:
+        content_type = ""
     try:
         payload = request.post_data_json
         if isinstance(payload, dict):
@@ -705,11 +714,42 @@ def _extract_graphql_request_details(request) -> dict[str, Any]:
                 variables = payload.get("variables") or {}
     except Exception:
         payload = None
-    if not operation_name:
+    try:
+        raw_post_data = str(request.post_data or "")
+    except Exception:
+        raw_post_data = ""
+    if "application/x-www-form-urlencoded" in content_type.lower() and raw_post_data:
         try:
-            post_data = str(request.post_data or "")
+            form_payload = parse_qs(raw_post_data, keep_blank_values=True)
         except Exception:
-            post_data = ""
+            form_payload = {}
+        raw_operations = str((form_payload.get("operations") or [""])[0] or "").strip()
+        raw_map = str((form_payload.get("map") or [""])[0] or "").strip()
+        if raw_operations:
+            try:
+                operations_payload = json.loads(raw_operations)
+                if isinstance(operations_payload, dict):
+                    operation_name = str(operations_payload.get("operationName") or operation_name).strip()
+                    if isinstance(operations_payload.get("variables"), dict):
+                        variables = operations_payload.get("variables") or variables
+            except Exception:
+                pass
+    if "multipart/form-data" in content_type.lower() and raw_post_data:
+        operations_match = re.search(r'name="operations"\r?\n\r?\n(.*?)\r?\n--', raw_post_data, re.DOTALL)
+        map_match = re.search(r'name="map"\r?\n\r?\n(.*?)\r?\n--', raw_post_data, re.DOTALL)
+        raw_operations = operations_match.group(1).strip() if operations_match else ""
+        raw_map = map_match.group(1).strip() if map_match else ""
+        if raw_operations:
+            try:
+                operations_payload = json.loads(raw_operations)
+                if isinstance(operations_payload, dict):
+                    operation_name = str(operations_payload.get("operationName") or operation_name).strip()
+                    if isinstance(operations_payload.get("variables"), dict):
+                        variables = operations_payload.get("variables") or variables
+            except Exception:
+                pass
+    if not operation_name:
+        post_data = raw_post_data
         if "uploadFileTool" in post_data:
             operation_name = "uploadFileTool"
         elif "getMyFilesUploadTool" in post_data:
@@ -719,15 +759,19 @@ def _extract_graphql_request_details(request) -> dict[str, Any]:
     if isinstance(input_payload, dict) and "isSensitive" in input_payload:
         is_sensitive = input_payload.get("isSensitive")
     return {
+        "content_type": content_type,
         "operation_name": operation_name,
         "variables": variables,
         "is_sensitive": is_sensitive,
-        "raw_post_data": str(getattr(request, "post_data", "") or ""),
+        "raw_post_data": raw_post_data,
+        "raw_operations": raw_operations,
+        "raw_map": raw_map,
     }
 
 
 def _log_graphql_request(request, *, source: str) -> None:
     details = _extract_graphql_request_details(request)
+    LOGGER.info("raw_graphql_content_type=%s | source=%s", details["content_type"] or "-", source)
     LOGGER.info(
         "graphql_request_operation=%s | graphql_request_variables=%s | source=%s",
         details["operation_name"] or "-",
@@ -740,8 +784,17 @@ def _log_graphql_request(request, *, source: str) -> None:
         details["operation_name"] or "-",
         source,
     )
-    if not details["operation_name"]:
-        LOGGER.info("graphql_request_raw_payload=%s | source=%s", details["raw_post_data"][:1000], source)
+    LOGGER.info("parsed_operation_name=%s | source=%s", details["operation_name"] or "-", source)
+    LOGGER.info(
+        "parsed_isSensitive=%s | source=%s",
+        details["is_sensitive"] if details["is_sensitive"] != "" else "-",
+        source,
+    )
+    LOGGER.info("raw_graphql_body_preview=%s | source=%s", details["raw_post_data"][:1000], source)
+    if details["raw_operations"]:
+        LOGGER.info("raw_graphql_operations=%s | source=%s", details["raw_operations"][:1000], source)
+    if details["raw_map"]:
+        LOGGER.info("raw_graphql_map=%s | source=%s", details["raw_map"][:1000], source)
 
 
 def summarize_upload_error(exc: Exception) -> str:
@@ -960,6 +1013,13 @@ def upload_image_to_vendor_tool(
 
         matched_graphql_upload = {"matched": False}
         after_save_started = {"value": False}
+        graphql_activity = {"last_request_at": 0.0, "last_response_at": 0.0}
+
+        def _mark_graphql_request_activity() -> None:
+            graphql_activity["last_request_at"] = time.monotonic()
+
+        def _mark_graphql_response_activity() -> None:
+            graphql_activity["last_response_at"] = time.monotonic()
 
         def _log_request_url_if_needed(request, *, source: str) -> None:
             if after_save_started["value"]:
@@ -969,11 +1029,13 @@ def upload_image_to_vendor_tool(
             _log_request_url_if_needed(request, source="context")
             if "/graphql" not in str(request.url or ""):
                 return
+            _mark_graphql_request_activity()
             _log_graphql_request(request, source="context")
 
         def _context_response_listener(response):
             if "/graphql" not in str(response.url or ""):
                 return
+            _mark_graphql_response_activity()
             request_details = _extract_graphql_request_details(response.request)
             operation_name = request_details["operation_name"] or "-"
             try:
@@ -992,11 +1054,13 @@ def upload_image_to_vendor_tool(
         def _page_request_listener(request):
             _log_request_url_if_needed(request, source="page")
             if "/graphql" in str(request.url or ""):
+                _mark_graphql_request_activity()
                 _log_graphql_request(request, source="page")
 
         def _page_response_listener(response):
             if "/graphql" not in str(response.url or ""):
                 return
+            _mark_graphql_response_activity()
             request_details = _extract_graphql_request_details(response.request)
             operation_name = request_details["operation_name"] or "-"
             try:
@@ -1027,9 +1091,21 @@ def upload_image_to_vendor_tool(
         page.on("popup", _popup_listener)
         page.on("framenavigated", _frame_listener)
 
+        def _drain_graphql_activity(*, idle_ms: int = 1500, max_wait_ms: int = 5000) -> None:
+            if not after_save_started["value"]:
+                return
+            deadline = time.monotonic() + (max_wait_ms / 1000)
+            idle_seconds = idle_ms / 1000
+            while time.monotonic() < deadline:
+                last_seen = max(graphql_activity["last_request_at"], graphql_activity["last_response_at"])
+                if last_seen and (time.monotonic() - last_seen) >= idle_seconds:
+                    return
+                page.wait_for_timeout(250)
+
         def _close_runtime() -> None:
             LOGGER.info("page_close_started=ok")
             try:
+                _drain_graphql_activity()
                 page.wait_for_timeout(1000)
             except Exception:
                 pass
@@ -1205,6 +1281,7 @@ def upload_image_to_vendor_tool(
             len(latest_rows),
             latest_rows,
         )
+        LOGGER.info("selected_final_source=%s", final_source or "-")
         _log_flow_step(
             "vendor_upload",
             "read_rows_after_save",
@@ -1218,10 +1295,17 @@ def upload_image_to_vendor_tool(
     if not final_url.startswith(public_url_prefix):
         if not _normalize_public_url(final_url, public_url_prefix=public_url_prefix):
             final_url = ""
+    if not final_url and final_source == "filename_match_wrong_path":
+        LOGGER.info("vendor_upload_wrong_path_detected=ok")
+        LOGGER.error("Vendor upload created non-social public URL | image_path=%s | rows=%s", upload_target_path, candidate_rows_by_filename)
     if not final_url:
+        LOGGER.info("selected_final_url=-")
+        LOGGER.info("selected_final_source=%s", final_source or "-")
         LOGGER.info("vendor_upload_failed_after_polling=ok")
         _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=upload_target_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", upload_target_path)
+        if final_source == "filename_match_wrong_path":
+            raise UploadImageError("Da upload thanh cong nhung link tra ve dang o garena-vendor-system/public thay vi garena-social/public.")
         raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
 
     LOGGER.info("selected_final_url=%s", final_url)
