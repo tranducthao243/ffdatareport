@@ -254,6 +254,7 @@ def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
         cells = row.locator("td")
         if cells.count() < 4:
             continue
+        owner_email = cells.nth(0).inner_text().strip()
         file_url = cells.nth(1).inner_text().strip()
         file_name = cells.nth(2).inner_text().strip()
         created_at = cells.nth(3).inner_text().strip()
@@ -269,6 +270,7 @@ def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
             file_name = Path(file_url.split("?", 1)[0]).name
         rows.append(
             {
+                "owner_email": owner_email,
                 "file_url": file_url,
                 "file_name": file_name,
                 "created_at": created_at,
@@ -282,18 +284,90 @@ def _clean_vendor_table_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
         normalized = {
+            "owner_email": str(row.get("owner_email") or "").strip(),
             "file_url": str(row.get("file_url") or "").strip(),
             "file_name": str(row.get("file_name") or "").strip(),
             "created_at": str(row.get("created_at") or "").strip(),
         }
         if not any(normalized.values()):
             continue
-        key = (normalized["file_url"], normalized["file_name"], normalized["created_at"])
+        key = (
+            normalized["owner_email"],
+            normalized["file_url"],
+            normalized["file_name"],
+            normalized["created_at"],
+        )
         if key in seen:
             continue
         seen.add(key)
         cleaned.append(normalized)
     return cleaned
+
+
+def _row_key(row: dict[str, str]) -> tuple[str, str, str, str]:
+    return (
+        str(row.get("owner_email") or "").strip(),
+        str(row.get("file_url") or "").strip(),
+        str(row.get("file_name") or "").strip(),
+        str(row.get("created_at") or "").strip(),
+    )
+
+
+def _top_urls(rows: list[dict[str, str]], *, limit: int = 3) -> list[str]:
+    urls: list[str] = []
+    for row in rows:
+        url = str(row.get("file_url") or "").strip()
+        if url:
+            urls.append(url)
+        if len(urls) >= limit:
+            break
+    return urls
+
+
+def _resolve_owner_email(rows: list[dict[str, str]]) -> str:
+    for row in rows:
+        owner_email = str(row.get("owner_email") or "").strip()
+        if owner_email:
+            return owner_email
+    return ""
+
+
+def _checked_sensitive_count(page) -> int:
+    return int(
+        page.evaluate(
+            """() => {
+                return Array.from(document.querySelectorAll('#basic input#basic_isSensitive'))
+                    .filter((node) => !!node.checked).length;
+            }"""
+        )
+    )
+
+
+def _force_uncheck_sensitive_checkbox(page) -> bool:
+    return bool(
+        page.evaluate(
+            """() => {
+                const checkedNodes = Array.from(document.querySelectorAll('#basic input#basic_isSensitive'))
+                    .filter((node) => !!node.checked);
+                checkedNodes.forEach((node) => {
+                    node.checked = false;
+                    node.dispatchEvent(new Event('input', { bubbles: true }));
+                    node.dispatchEvent(new Event('change', { bubbles: true }));
+                });
+                return checkedNodes.length > 0;
+            }"""
+        )
+    )
+
+
+def _visible_save_button(page):
+    buttons = page.locator("#basic button[type='submit']")
+    total_count = buttons.count()
+    visible_indexes: list[int] = []
+    for index in range(total_count):
+        if buttons.nth(index).is_visible():
+            visible_indexes.append(index)
+    return buttons, total_count, visible_indexes
 
 
 def _normalize_vendor_filename(value: str) -> str:
@@ -746,8 +820,7 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
 
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
-            upload_zone = page.locator(".ant-upload-drag-container").first
-            upload_zone.wait_for(timeout=timeout_ms)
+            page.locator(".ant-upload-drag-container").first.wait_for(timeout=timeout_ms)
             _log_flow_step("vendor_upload", "auth_and_open_page", "ok", upload_url=upload_url)
             LOGGER.info("Vendor upload auth success | url=%s", upload_url)
         except PlaywrightTimeoutError as exc:
@@ -787,7 +860,13 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             owner_email or "-",
             existing_rows,
         )
+        LOGGER.info(
+            "snapshot_before_save_count=%s | snapshot_before_save_top_urls=%s",
+            len(existing_rows),
+            list(existing_urls)[:3],
+        )
         _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=len(existing_rows))
+
         try:
             upload_state = _wait_for_vendor_upload_ready(page, timeout_ms=min(timeout_ms, 20000))
             page.wait_for_timeout(1000)
@@ -800,116 +879,65 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
                 done=upload_state.get("done"),
                 errors=upload_state.get("error"),
             )
-            LOGGER.info(
-                "Vendor upload component ready for save | image_path=%s | upload_state=%s",
-                image_path,
-                upload_state,
-            )
+            LOGGER.info("Vendor upload component ready for save | image_path=%s | upload_state=%s", image_path, upload_state)
         except UploadImageError:
-            _log_flow_step("vendor_upload", "wait_upload_component", "fail", image_name=image_path.name)
-            raise
+            _log_flow_step("vendor_upload", "wait_upload_component", "warn", image_name=image_path.name)
+            LOGGER.warning("Vendor upload component did not expose a done state before timeout | image_path=%s", image_path)
         _log_flow_step("vendor_upload", "upload_to_component", "ok", image_path=image_path)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
         _ensure_sensitive_checkbox_unchecked(page, timeout_ms=min(timeout_ms, 10000), image_path=image_path)
 
-        def _click_save() -> None:
-            save_buttons = page.locator("#basic button[type='submit']")
-            save_button_total_count = save_buttons.count()
-            save_buttons_visible = page.locator("#basic button[type='submit']:visible")
-            save_button_visible_count = save_buttons_visible.count()
-            _log_flow_step("vendor_upload", "save_button_total_count", "ok", count=save_button_total_count)
-            _log_flow_step("vendor_upload", "save_button_visible_count", "ok", count=save_button_visible_count)
-            if save_button_visible_count <= 0:
-                raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
-            save_button = save_buttons_visible.first
+        save_buttons = page.locator("#basic button[type='submit']")
+        save_button_total_count = save_buttons.count()
+        save_buttons_visible = page.locator("#basic button[type='submit']:visible")
+        save_button_visible_count = save_buttons_visible.count()
+        LOGGER.info("save_button_total_count=%s", save_button_total_count)
+        LOGGER.info("save_button_visible_count=%s", save_button_visible_count)
+        if save_button_visible_count <= 0:
+            browser.close()
+            raise UploadImageError("Khong tim thay nut Save trong form upload Vendor Tool.")
 
-            target_html = ""
-            try:
-                target_html = str(save_button.evaluate("node => node.outerHTML") or "").strip()
-            except Exception:
-                target_html = ""
-            _log_flow_step(
-                "vendor_upload",
-                "save_button_target_html",
-                "ok" if target_html else "warn",
-                html=target_html[:300],
-            )
+        matched_graphql_upload = {"matched": False}
 
-            disabled_before = False
-            try:
-                disabled_before = bool(save_button.is_disabled())
-            except Exception:
-                disabled_before = False
-            _log_flow_step("vendor_upload", "save_button_state", "ok", disabled=disabled_before)
+        def _response_listener(response):
+            if _is_upload_file_tool_response(response):
+                matched_graphql_upload["matched"] = True
+                LOGGER.info("graphql_upload_response_matched=ok | url=%s", response.url)
 
-            if disabled_before:
-                page.wait_for_timeout(800)
-                try:
-                    disabled_before = bool(save_button.is_disabled())
-                except Exception:
-                    disabled_before = False
-                _log_flow_step("vendor_upload", "save_button_state_retry", "ok", disabled=disabled_before)
-                if disabled_before:
-                    raise UploadImageError("Nut Save dang bi disable tren Vendor Tool.")
-
-            try:
-                save_button.scroll_into_view_if_needed(timeout=5000)
-            except Exception:
-                pass
-
-            try:
-                save_button.click(timeout=5000)
-                return
-            except Exception:
-                pass
-
-            try:
-                save_button.click(timeout=3000, force=True)
-                return
-            except Exception:
-                pass
-
-            try:
-                save_button.evaluate("node => node.click()")
-            except Exception as exc:
-                raise UploadImageError(f"Khong bam duoc nut Save tren Vendor Tool: {exc}") from exc
-
-        upload_response_payload: dict[str, Any] = {}
-        upload_response_status = 0
+        page.on("response", _response_listener)
         try:
-            with page.expect_response(_is_upload_file_tool_response, timeout=min(timeout_ms, 30000)) as upload_response_info:
-                _log_flow_step("vendor_upload", "click_save_started", "ok", image_path=image_path)
-                _click_save()
-                _log_flow_step("vendor_upload", "click_save_done", "ok", image_path=image_path)
-            upload_response = upload_response_info.value
-            upload_response_status = upload_response.status
-            upload_response_payload = upload_response.json()
+            LOGGER.info("click_save_started=ok")
+            save_buttons_visible.first.click(timeout=5000)
+            LOGGER.info("click_save_done=ok")
             _log_flow_step("vendor_upload", "click_save", "ok", image_path=image_path)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
-            LOGGER.info(
-                "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
-                upload_response_status,
-                upload_response_payload,
-            )
-            if (upload_response_payload.get("data") or {}).get("uploadFileTool") is not True:
-                raise UploadImageError(
-                    f"Vendor GraphQL uploadFileTool response invalid: status={upload_response_status}, payload={upload_response_payload}"
-                )
-            _log_flow_step("vendor_upload", "graphql_upload_confirm", "ok", status=upload_response_status)
         except PlaywrightTimeoutError as exc:
+            LOGGER.info("click_save_done=fail")
             _log_flow_step("vendor_upload", "click_save", "fail", image_path=image_path)
-            _log_flow_step("vendor_upload", "click_save_done", "fail", image_path=image_path)
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
             browser.close()
-            raise UploadImageError("Khong nhan duoc response GraphQL uploadFileTool sau khi bam Save.") from exc
+            raise UploadImageError("Save button was not clickable.") from exc
 
         LOGGER.info("Waiting for vendor result URL | image_path=%s | timeout_ms=%s", image_path, result_timeout_ms)
         deadline = time.monotonic() + (result_timeout_ms / 1000)
-        latest_rows: list[dict[str, str]] = []
+        latest_rows: list[dict[str, str]] = existing_rows
         final_url = ""
+        poll_attempt = 0
         while time.monotonic() < deadline:
+            poll_attempt += 1
             latest_rows = _fetch_vendor_graphql_files(page)
+            after_urls = [
+                _normalize_public_url(row.get("file", ""), public_url_prefix=public_url_prefix)
+                for row in latest_rows
+            ]
+            after_urls = [url for url in after_urls if url]
+            LOGGER.info(
+                "snapshot_after_save_count=%s | snapshot_after_save_top_urls=%s | poll_attempt=%s",
+                len(latest_rows),
+                after_urls[:3],
+                poll_attempt,
+            )
             final_url = _pick_new_vendor_url(
                 latest_rows,
                 before_urls=existing_urls,
@@ -917,6 +945,7 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
                 owner_email=owner_email,
             )
             if final_url:
+                LOGGER.info("vendor_new_url_detected=%s", final_url)
                 break
             page.wait_for_timeout(1000)
 
@@ -926,8 +955,6 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             len(latest_rows),
             latest_rows,
         )
-        if final_url:
-            LOGGER.info("Vendor new URL detected | image_path=%s | final_url=%s", image_path, final_url)
         _log_flow_step(
             "vendor_upload",
             "read_rows_after_save",
@@ -937,10 +964,14 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         )
         browser.close()
 
+    LOGGER.info("graphql_upload_response_matched=%s", "ok" if matched_graphql_upload["matched"] else "missed")
     if not final_url.startswith(public_url_prefix):
+        LOGGER.info("vendor_upload_failed_after_polling=ok")
         _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=image_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
         raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
+
+    LOGGER.info("vendor_upload_success_via_snapshot_diff=ok | final_url=%s", final_url)
     _log_flow_step("vendor_upload", "finalize_public_url", "ok", final_url=final_url)
     LOGGER.info("Vendor result URL found | url=%s", final_url)
     return final_url
