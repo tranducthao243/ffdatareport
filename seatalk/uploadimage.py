@@ -261,6 +261,12 @@ def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
             anchors = cells.nth(1).locator("a")
             if anchors.count() > 0:
                 file_url = anchors.first.inner_text().strip()
+        if not file_name:
+            anchors = cells.nth(2).locator("a")
+            if anchors.count() > 0:
+                file_name = anchors.first.inner_text().strip()
+        if not file_name and file_url:
+            file_name = Path(file_url.split("?", 1)[0]).name
         rows.append(
             {
                 "file_url": file_url,
@@ -271,6 +277,25 @@ def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
     return rows
 
 
+def _clean_vendor_table_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    cleaned: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        normalized = {
+            "file_url": str(row.get("file_url") or "").strip(),
+            "file_name": str(row.get("file_name") or "").strip(),
+            "created_at": str(row.get("created_at") or "").strip(),
+        }
+        if not any(normalized.values()):
+            continue
+        key = (normalized["file_url"], normalized["file_name"], normalized["created_at"])
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(normalized)
+    return cleaned
+
+
 def _normalize_vendor_filename(value: str) -> str:
     return Path(str(value or "").strip()).name.lower()
 
@@ -279,7 +304,7 @@ def _wait_for_vendor_table_rows(page, *, timeout_ms: int) -> list[dict[str, str]
     deadline = time.monotonic() + (timeout_ms / 1000)
     latest_rows: list[dict[str, str]] = []
     while time.monotonic() < deadline:
-        latest_rows = _extract_vendor_table_rows(page)
+        latest_rows = _clean_vendor_table_rows(_extract_vendor_table_rows(page))
         if any(row.get("file_url") or row.get("created_at") for row in latest_rows):
             return latest_rows
         page.wait_for_timeout(500)

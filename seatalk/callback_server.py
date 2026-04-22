@@ -55,6 +55,7 @@ from .uploadimage import (
 
 
 LOGGER = logging.getLogger("seatalk.callback_server")
+SEATALK_DIRECT_IMAGE_REPLY_ENABLED = os.getenv("SEATALK_DIRECT_IMAGE_REPLY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 PRIVATE_FUTURE_FEATURE_MESSAGE = (
@@ -716,6 +717,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
                 )
                 try:
+                    if not SEATALK_DIRECT_IMAGE_REPLY_ENABLED:
+                        raise SeaTalkError("SeaTalk direct image reply disabled; using vendor fallback.")
                     send_seatalk_image_reply(private_client, output_path)
                 except SeaTalkError as exc:
                     LOGGER.warning(
