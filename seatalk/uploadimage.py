@@ -907,16 +907,37 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
 
         page.on("response", _response_listener)
         try:
-            LOGGER.info("click_save_started=ok")
-            save_buttons_visible.first.click(timeout=5000)
-            LOGGER.info("click_save_done=ok")
+            LOGGER.info("save_button_js_click_started=ok")
+            clicked = bool(
+                page.evaluate(
+                    """() => {
+                        const buttons = Array.from(document.querySelectorAll('#basic button[type="submit"]'));
+                        const visibleButton = buttons.find((button) => {
+                            const rect = button.getBoundingClientRect();
+                            const style = window.getComputedStyle(button);
+                            return rect.width > 0
+                                && rect.height > 0
+                                && style.visibility !== 'hidden'
+                                && style.display !== 'none';
+                        });
+                        if (!visibleButton) return false;
+                        visibleButton.click();
+                        return true;
+                    }"""
+                )
+            )
+            if not clicked:
+                raise UploadImageError("Khong tim thay nut Save visible de JS click tren Vendor Tool.")
+            LOGGER.info("save_button_js_click_done=ok")
             _log_flow_step("vendor_upload", "click_save", "ok", image_path=image_path)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
-        except PlaywrightTimeoutError as exc:
-            LOGGER.info("click_save_done=fail")
+        except Exception as exc:
+            LOGGER.info("save_button_js_click_done=fail")
             _log_flow_step("vendor_upload", "click_save", "fail", image_path=image_path)
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
             browser.close()
+            if isinstance(exc, UploadImageError):
+                raise
             raise UploadImageError("Save button was not clickable.") from exc
 
         LOGGER.info("Waiting for vendor result URL | image_path=%s | timeout_ms=%s", image_path, result_timeout_ms)
