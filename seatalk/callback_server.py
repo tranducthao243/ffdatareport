@@ -816,7 +816,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 send=False,
                 seatalk_app_id=runtime["seatalk_app_id"],
                 seatalk_app_secret=runtime["seatalk_app_secret"],
-                seatalk_admin_employee_codes=runtime["admin_employee_codes"],
+                seatalk_admin_employee_codes=runtime.get("admin_employee_codes", []),
                 seatalk_superadmin_users=runtime["superadmin_users"],
             )
 
