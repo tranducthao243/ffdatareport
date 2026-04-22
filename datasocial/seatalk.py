@@ -84,6 +84,16 @@ class SeaTalkClient:
         file_path = Path(path)
         return self.send_image_bytes(file_path.read_bytes())
 
+    def send_image_url(self, url: str) -> dict[str, Any]:
+        return self.send_message(
+            {
+                "tag": "image",
+                "image": {
+                    "content": url,
+                },
+            }
+        )
+
     def set_typing_status(self) -> dict[str, Any]:
         token = self.token or self.get_app_access_token()
         headers = {

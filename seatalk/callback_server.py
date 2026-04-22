@@ -732,11 +732,29 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         employee_code,
                         final_url,
                     )
-                    fallback_reply = (
-                        "**Tach nen anh thanh cong**\n"
-                        "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"
-                        f"- Link anh: {final_url}"
-                    )
+                    try:
+                        private_client.send_image_url(final_url)
+                        LOGGER.info(
+                            "Removebg vendor image URL reply succeeded | employee_code=%s | final_url=%s",
+                            employee_code,
+                            final_url,
+                        )
+                        fallback_reply = (
+                            "**Tach nen anh thanh cong**\n"
+                            f"*Toi da gui lai anh PNG bang URL anh.*\n"
+                            f"- Link anh: {final_url}"
+                        )
+                    except SeaTalkError as nested_exc:
+                        LOGGER.warning(
+                            "Removebg vendor image URL reply failed; falling back to text link | employee_code=%s | error=%s",
+                            employee_code,
+                            nested_exc,
+                        )
+                        fallback_reply = (
+                            "**Tach nen anh thanh cong**\n"
+                            "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"
+                            f"- Link anh: {final_url}"
+                        )
             except UploadImageError as exc:
                 LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
                 with private_message_lock:

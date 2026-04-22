@@ -448,6 +448,28 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         content = kwargs["json"]["message"]["image_base64"]["content"]
         self.assertEqual(base64.b64decode(content.encode("ascii")), b"png-bytes")
 
+    def test_send_image_url_uses_image_content_message(self):
+        client = SeaTalkClient(
+            SeaTalkSettings(
+                app_id="app",
+                app_secret="secret",
+                employee_code="e_123",
+                thread_id="thread-1",
+            )
+        )
+        client.token = "token"
+        response = Mock()
+        response.ok = True
+        response.json.return_value = {"code": 0}
+        client.session.post = Mock(return_value=response)
+
+        client.send_image_url("https://files.example.com/image.png")
+
+        _, kwargs = client.session.post.call_args
+        self.assertEqual(kwargs["json"]["message"]["tag"], "image")
+        self.assertEqual(kwargs["json"]["message"]["image"]["content"], "https://files.example.com/image.png")
+        self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
+
     @patch("seatalk.sender.build_seatalk_client")
     def test_send_report_packages_sends_text_then_interactive_when_actions_exist(self, mock_build_client):
         client = Mock()
