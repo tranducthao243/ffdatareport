@@ -25,7 +25,7 @@ DEFAULT_VENDOR_UPLOAD_URL = "https://vendors.garena.vn/upload-tool"
 DEFAULT_VENDOR_PUBLIC_URL_PREFIX = "https://files.garena.vn/garena-social/public/"
 DEFAULT_REMOVEBG_SPACE_ID = "amirgame197/Remove-Background"
 DEFAULT_REMOVEBG_API_NAME = "/predict"
-DEFAULT_SEATALK_IMAGE_MAX_BYTES = 7 * 1024 * 1024
+DEFAULT_SEATALK_IMAGE_MAX_BYTES = 3_600_000
 
 
 class UploadImageError(RuntimeError):
@@ -252,6 +252,10 @@ def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
     return rows
 
 
+def _normalize_vendor_filename(value: str) -> str:
+    return Path(str(value or "").strip()).name.lower()
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -267,6 +271,8 @@ def summarize_upload_error(exc: Exception) -> str:
         return "Bot khong bo duoc o tick du lieu nhay cam tren Vendor Tool."
     if "valid length/size limit" in lowered or "4001" in lowered:
         return "SeaTalk tu choi anh tra ve vi vuot gioi han kich thuoc/noi dung hop le."
+    if "message cannot be empty" in lowered or "4003" in lowered:
+        return "SeaTalk tu choi payload anh tra ve. Can doi sang cach gui file/anh phu hop hon voi API hien tai."
     if "public url" in lowered:
         return "Khong tim thay link anh public moi sau khi bam Save."
     if "save button was not clickable" in lowered:
@@ -356,6 +362,10 @@ def convert_image_to_png(image_path: Path) -> Path:
                 height,
                 target_path.stat().st_size,
             )
+        if target_path.stat().st_size > max_bytes:
+            quantized = working.convert("P", palette=Image.ADAPTIVE, colors=255)
+            quantized.save(target_path, format="PNG", optimize=True, transparency=0)
+            LOGGER.info("Quantized PNG for SeaTalk delivery | path=%s | bytes=%s", target_path, target_path.stat().st_size)
     return target_path
 
 
@@ -506,12 +516,11 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             page.wait_for_timeout(1000)
             LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
         except PlaywrightTimeoutError:
-            LOGGER.error(
+            LOGGER.warning(
                 "Vendor upload component did not expose a done state before timeout | image_path=%s",
                 image_path,
             )
-            browser.close()
-            raise UploadImageError("Vendor Tool chua upload xong file vao he thong, nen bot dung lai truoc khi bam Save.")
+            page.wait_for_timeout(1500)
         LOGGER.info("Vendor upload success | image_path=%s | upload_response_urls=%s", image_path, upload_response_urls)
 
         checkbox = page.locator("input#basic_isSensitive").first
@@ -567,6 +576,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         deadline = time.monotonic() + (result_timeout_ms / 1000)
         final_candidates: list[dict[str, str]] = []
         final_row_count = existing_row_count
+        expected_file_name = _normalize_vendor_filename(image_path.name)
         while time.monotonic() < deadline:
             try:
                 page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
@@ -581,8 +591,13 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 if row.get("file_url", "").startswith(public_url_prefix)
                 and row.get("file_url", "") not in existing_urls
             ]
+            matching_name_rows = [
+                row
+                for row in table_new_rows
+                if _normalize_vendor_filename(row.get("file_name", "")) == expected_file_name
+            ]
             final_candidates = []
-            for row in table_new_rows:
+            for row in matching_name_rows or table_new_rows:
                 if row not in final_candidates:
                     final_candidates.append(row)
             if response_new_urls:

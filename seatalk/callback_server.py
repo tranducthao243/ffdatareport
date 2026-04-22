@@ -711,6 +711,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
                     employee_code=employee_code,
+                    thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
                 )
                 send_seatalk_image_reply(private_client, output_path)
             except UploadImageError as exc:
