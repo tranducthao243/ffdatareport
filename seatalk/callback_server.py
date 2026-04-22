@@ -646,6 +646,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 final_url = upload_image_to_vendor_tool(
                     image_path,
                     owner_email=callback_context.get("email", ""),
+                    upload_filename_hint=f"seatalk-{employee_code}-{int(datetime.now().timestamp())}",
                 )
             except UploadImageError as exc:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
@@ -732,6 +733,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     final_url = upload_image_to_vendor_tool(
                         output_path,
                         owner_email=callback_context.get("email", ""),
+                        upload_filename_hint=f"seatalk-{employee_code}-removebg-{int(datetime.now().timestamp())}",
                     )
                     LOGGER.info(
                         "Removebg fallback to Vendor Tool link succeeded | employee_code=%s | final_url=%s",
