@@ -674,6 +674,10 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             raise UploadImageError("Upload input not found on vendor tool page.")
         _log_flow_step("vendor_upload", "find_file_input", "ok", image_path=image_path)
 
+        file_input.set_input_files(str(image_path))
+        page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
+        _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
+
         existing_rows = _fetch_vendor_graphql_files(page)
         if not owner_email:
             for row in existing_rows:
@@ -694,42 +698,8 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             existing_rows,
         )
         _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=len(existing_rows))
-
-        upload_response_payload: dict[str, Any] = {}
-        upload_response_status = 0
-        upload_response_captured = False
-        file_set = False
-        try:
-            with page.expect_response(_is_upload_file_tool_response, timeout=min(timeout_ms, 30000)) as upload_response_info:
-                file_input.set_input_files(str(image_path))
-                file_set = True
-            upload_response = upload_response_info.value
-            upload_response_status = upload_response.status
-            upload_response_payload = upload_response.json()
-            upload_response_captured = True
-            LOGGER.info(
-                "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
-                upload_response_status,
-                upload_response_payload,
-            )
-        except PlaywrightTimeoutError:
-            if not file_set:
-                file_input.set_input_files(str(image_path))
-            LOGGER.warning(
-                "Vendor GraphQL uploadFileTool response was not captured in time; continue with post-save snapshot validation | image_path=%s",
-                image_path,
-            )
-            _log_flow_step("vendor_upload", "graphql_upload_confirm", "warn", reason="response_not_captured")
-        page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
-        _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
         try:
             upload_state = _wait_for_vendor_upload_ready(page, timeout_ms=min(timeout_ms, 20000))
-            if upload_response_captured:
-                if (upload_response_payload.get("data") or {}).get("uploadFileTool") is not True:
-                    raise UploadImageError(
-                        f"Vendor GraphQL uploadFileTool response invalid: status={upload_response_status}, payload={upload_response_payload}"
-                    )
-                _log_flow_step("vendor_upload", "graphql_upload_confirm", "ok", status=upload_response_status)
             page.wait_for_timeout(1000)
             _log_flow_step(
                 "vendor_upload",
@@ -773,18 +743,37 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
                 _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "fail", image_path=image_path)
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
-        try:
+        def _click_save() -> None:
             try:
                 page.get_by_role("button", name="Save").click(timeout=timeout_ms)
             except PlaywrightTimeoutError:
                 page.locator("button[type='submit'].ant-btn-primary").first.click(timeout=timeout_ms)
+
+        upload_response_payload: dict[str, Any] = {}
+        upload_response_status = 0
+        try:
+            with page.expect_response(_is_upload_file_tool_response, timeout=min(timeout_ms, 30000)) as upload_response_info:
+                _click_save()
+            upload_response = upload_response_info.value
+            upload_response_status = upload_response.status
+            upload_response_payload = upload_response.json()
             _log_flow_step("vendor_upload", "click_save", "ok", image_path=image_path)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
+            LOGGER.info(
+                "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
+                upload_response_status,
+                upload_response_payload,
+            )
+            if (upload_response_payload.get("data") or {}).get("uploadFileTool") is not True:
+                raise UploadImageError(
+                    f"Vendor GraphQL uploadFileTool response invalid: status={upload_response_status}, payload={upload_response_payload}"
+                )
+            _log_flow_step("vendor_upload", "graphql_upload_confirm", "ok", status=upload_response_status)
         except PlaywrightTimeoutError as exc:
             _log_flow_step("vendor_upload", "click_save", "fail", image_path=image_path)
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
             browser.close()
-            raise UploadImageError("Save button was not clickable.") from exc
+            raise UploadImageError("Khong nhan duoc response GraphQL uploadFileTool sau khi bam Save.") from exc
 
         LOGGER.info("Waiting for vendor result URL | image_path=%s | timeout_ms=%s", image_path, result_timeout_ms)
         deadline = time.monotonic() + (result_timeout_ms / 1000)
