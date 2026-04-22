@@ -347,53 +347,57 @@ def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | b
 
 
 def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: Path) -> None:
-    all_checkbox = page.locator("#basic input#basic_isSensitive")
-    checkbox = all_checkbox.first
-    click_targets = [
-        ("label.ant-checkbox-wrapper", page.locator("#basic label.ant-checkbox-wrapper").first),
-        (".ant-checkbox-inner", page.locator("#basic .ant-checkbox-inner").first),
-        ("#basic_isSensitive", checkbox),
-    ]
-    if checkbox.count() <= 0:
+    checkbox_total_count = page.locator("#basic input#basic_isSensitive").count()
+    checkbox_visible_count = page.locator("#basic input#basic_isSensitive:visible").count()
+    _log_flow_step("vendor_upload", "checkbox_total_count", "ok", count=checkbox_total_count)
+    _log_flow_step("vendor_upload", "checkbox_visible_count", "ok", count=checkbox_visible_count)
+
+    if checkbox_total_count <= 0:
         _log_flow_step("vendor_upload", "sensitive_checkbox_before", "warn", found=False)
         _log_flow_step("vendor_upload", "sensitive_checkbox_after", "warn", found=False)
+        _log_flow_step("vendor_upload", "checkbox_scoped_target", "warn", reason="#basic", found=False)
         LOGGER.warning("Vendor sensitive checkbox not found | image_path=%s", image_path)
         return
 
+    _log_flow_step(
+        "vendor_upload",
+        "checkbox_scoped_target",
+        "ok",
+        reason="#basic",
+        selector="#basic input#basic_isSensitive:checked",
+    )
+
     # Ant Design upload form updates asynchronously after selecting a file.
     page.wait_for_timeout(250)
-    before_checked = page.locator("#basic input#basic_isSensitive:checked").count() > 0
+    checked_count_before = page.locator("#basic input#basic_isSensitive:checked").count()
+    before_checked = checked_count_before > 0
+    _log_flow_step("vendor_upload", "checked_count_before", "ok", count=checked_count_before)
+    _log_flow_step("vendor_upload", "checkbox_checked_before", "ok", checked=before_checked)
     _log_flow_step("vendor_upload", "sensitive_checkbox_before", "ok", checked=before_checked)
     LOGGER.info("Vendor sensitive checkbox before save | image_path=%s | checked=%s", image_path, before_checked)
     if before_checked:
-        target_index = 0
-        max_attempts = 6
+        max_attempts = 2
         for attempt in range(1, max_attempts + 1):
-            # Prefer clicking the label that wraps a checked checkbox in the active #basic form.
-            checked_label = page.locator("#basic label.ant-checkbox-wrapper:has(input#basic_isSensitive:checked)").first
-            target_name, target = click_targets[target_index]
-            if checked_label.count() > 0:
-                target_name = "label.ant-checkbox-wrapper:has(:checked)"
-                target = checked_label
-            if target.count() <= 0:
-                target_index = (target_index + 1) % len(click_targets)
-                _log_flow_step("vendor_upload", "sensitive_checkbox_retry", "warn", attempt=attempt, target=target_name, reason="target_missing")
-                continue
-            _log_flow_step("vendor_upload", "sensitive_checkbox_click_target", "ok", attempt=attempt, target=target_name)
-            target.click(timeout=timeout_ms, force=True)
+            affected = page.evaluate(
+                """() => {
+                    const checkedNodes = Array.from(document.querySelectorAll('#basic input#basic_isSensitive:checked'));
+                    for (const node of checkedNodes) {
+                        node.checked = false;
+                        node.dispatchEvent(new Event('input', { bubbles: true }));
+                        node.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    return checkedNodes.length;
+                }"""
+            )
+            _log_flow_step("vendor_upload", "js_force_uncheck_applied", "ok", attempt=attempt, affected=affected)
             page.wait_for_timeout(250)
             if page.locator("#basic input#basic_isSensitive:checked").count() == 0:
                 break
-            _log_flow_step("vendor_upload", "sensitive_checkbox_retry", "warn", attempt=attempt, target=target_name)
-            LOGGER.warning(
-                "Vendor sensitive checkbox still checked after click | image_path=%s | attempt=%s | target=%s",
-                image_path,
-                attempt,
-                target_name,
-            )
-            # Auto-recheck/rerender: rotate next target and retry once more.
-            target_index = (target_index + 1) % len(click_targets)
-    after_checked = page.locator("#basic input#basic_isSensitive:checked").count() > 0
+
+    checked_count_after = page.locator("#basic input#basic_isSensitive:checked").count()
+    after_checked = checked_count_after > 0
+    _log_flow_step("vendor_upload", "checked_count_after", "ok" if not after_checked else "fail", count=checked_count_after)
+    _log_flow_step("vendor_upload", "checkbox_checked_after", "ok" if not after_checked else "fail", checked=after_checked)
     _log_flow_step("vendor_upload", "sensitive_checkbox_after", "ok" if not after_checked else "fail", checked=after_checked)
     LOGGER.info("Vendor sensitive checkbox after save prep | image_path=%s | checked=%s", image_path, after_checked)
     if after_checked:
