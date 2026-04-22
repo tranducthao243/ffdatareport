@@ -346,6 +346,43 @@ def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | b
     )
 
 
+def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: Path) -> None:
+    checkbox = page.locator("input#basic_isSensitive").first
+    if checkbox.count() <= 0:
+        _log_flow_step("vendor_upload", "sensitive_checkbox_before", "warn", found=False)
+        _log_flow_step("vendor_upload", "sensitive_checkbox_after", "warn", found=False)
+        LOGGER.warning("Vendor sensitive checkbox not found | image_path=%s", image_path)
+        return
+
+    before_checked = checkbox.is_checked()
+    _log_flow_step("vendor_upload", "sensitive_checkbox_before", "ok", checked=before_checked)
+    LOGGER.info("Vendor sensitive checkbox before save | image_path=%s | checked=%s", image_path, before_checked)
+    if before_checked:
+        toggled = False
+        try:
+            checkbox.uncheck(timeout=timeout_ms)
+            toggled = True
+        except Exception:
+            LOGGER.warning("Vendor checkbox.uncheck failed, trying click fallback | image_path=%s", image_path)
+        if not toggled:
+            try:
+                checkbox.click(timeout=timeout_ms)
+                toggled = True
+            except Exception:
+                LOGGER.warning("Vendor checkbox.click failed, trying label click fallback | image_path=%s", image_path)
+        if not toggled:
+            label = page.locator("label[for='basic_isSensitive']").first
+            if label.count() > 0:
+                label.click(timeout=timeout_ms)
+                toggled = True
+        page.wait_for_timeout(200)
+    after_checked = checkbox.is_checked()
+    _log_flow_step("vendor_upload", "sensitive_checkbox_after", "ok" if not after_checked else "fail", checked=after_checked)
+    LOGGER.info("Vendor sensitive checkbox after save prep | image_path=%s | checked=%s", image_path, after_checked)
+    if after_checked:
+        raise UploadImageError("Khong bo tick duoc o du lieu nhay cam tren Vendor Tool.")
+
+
 def _extract_graphql_files(payload: dict[str, Any]) -> list[dict[str, str]]:
     data = payload.get("data") or {}
     files = data.get("getMyFilesUploadTool")
@@ -721,27 +758,7 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         _log_flow_step("vendor_upload", "upload_to_component", "ok", image_path=image_path)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
-        checkbox = page.locator("input#basic_isSensitive").first
-        if checkbox.count() > 0:
-            try:
-                if checkbox.is_checked():
-                    unchecked = page.evaluate(
-                        """() => {
-                            const checkbox = document.querySelector('#basic_isSensitive') || document.querySelector('input[type="checkbox"]');
-                            if (!checkbox) return false;
-                            checkbox.checked = false;
-                            checkbox.dispatchEvent(new Event('input', { bubbles: true }));
-                            checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                            return checkbox.checked === false;
-                        }"""
-                    )
-                    if not unchecked:
-                        raise UploadImageError("Khong bo tick duoc o du lieu nhay cam tren Vendor Tool.")
-                    _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "ok", image_path=image_path)
-                    LOGGER.info("Vendor sensitive-data checkbox unchecked before save | image_path=%s", image_path)
-            except Exception:
-                _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "fail", image_path=image_path)
-                LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
+        _ensure_sensitive_checkbox_unchecked(page, timeout_ms=min(timeout_ms, 10000), image_path=image_path)
 
         def _click_save() -> None:
             try:
@@ -753,7 +770,9 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         upload_response_status = 0
         try:
             with page.expect_response(_is_upload_file_tool_response, timeout=min(timeout_ms, 30000)) as upload_response_info:
+                _log_flow_step("vendor_upload", "click_save_started", "ok", image_path=image_path)
                 _click_save()
+                _log_flow_step("vendor_upload", "click_save_done", "ok", image_path=image_path)
             upload_response = upload_response_info.value
             upload_response_status = upload_response.status
             upload_response_payload = upload_response.json()
@@ -771,6 +790,7 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
             _log_flow_step("vendor_upload", "graphql_upload_confirm", "ok", status=upload_response_status)
         except PlaywrightTimeoutError as exc:
             _log_flow_step("vendor_upload", "click_save", "fail", image_path=image_path)
+            _log_flow_step("vendor_upload", "click_save_done", "fail", image_path=image_path)
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
             browser.close()
             raise UploadImageError("Khong nhan duoc response GraphQL uploadFileTool sau khi bam Save.") from exc
