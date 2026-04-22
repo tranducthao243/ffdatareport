@@ -393,6 +393,34 @@ def _ensure_sensitive_checkbox_unchecked(page, *, timeout_ms: int, image_path: P
         raise UploadImageError("Khong bo tick duoc o du lieu nhay cam tren Vendor Tool.")
 
 
+def _log_checkbox_dom_snapshot(page, *, image_path: Path) -> None:
+    checkbox_count = page.locator("#basic_isSensitive").count()
+    label_count = page.locator("label.ant-checkbox-wrapper").count()
+    inner_count = page.locator(".ant-checkbox-inner").count()
+    LOGGER.info(
+        "Vendor checkbox DOM snapshot | image_path=%s | #basic_isSensitive=%s | label.ant-checkbox-wrapper=%s | .ant-checkbox-inner=%s",
+        image_path,
+        checkbox_count,
+        label_count,
+        inner_count,
+    )
+    parent_outer_html = ""
+    if checkbox_count > 0:
+        try:
+            parent_outer_html = page.evaluate(
+                """() => {
+                    const node = document.querySelector('#basic_isSensitive');
+                    if (!node) return '';
+                    const parent = node.closest('div.ant-form-item') || node.parentElement;
+                    return parent ? parent.outerHTML : '';
+                }"""
+            )
+        except Exception:
+            parent_outer_html = ""
+    if parent_outer_html:
+        LOGGER.info("Vendor checkbox parent outerHTML | image_path=%s | outerHTML=%s", image_path, parent_outer_html)
+
+
 def _extract_graphql_files(payload: dict[str, Any]) -> list[dict[str, str]]:
     data = payload.get("data") or {}
     files = data.get("getMyFilesUploadTool")
@@ -724,6 +752,7 @@ def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> s
         file_input.set_input_files(str(image_path))
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
+        _log_checkbox_dom_snapshot(page, image_path=image_path)
 
         existing_rows = _fetch_vendor_graphql_files(page)
         if not owner_email:
