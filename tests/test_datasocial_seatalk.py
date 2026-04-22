@@ -20,6 +20,7 @@ from seatalk.payloads import build_interactive_group_payload, build_interactive_
 from seatalk.sender import send_report_packages
 from seatalk.uploadimage import (
     _filename_match_tokens,
+    _pick_new_vendor_url,
     _safe_filename_stem,
     convert_image_to_png,
     get_latest_unprocessed_image_for_user,
@@ -315,6 +316,35 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertNotEqual(stem_one, stem_two)
         self.assertNotEqual(stem_one.rsplit("-", 1)[-1], stem_two.rsplit("-", 1)[-1])
         self.assertIn(stem_one.rsplit("-", 1)[-1], _filename_match_tokens(Path(f"{stem_one}.jpg")))
+
+    def test_pick_new_vendor_url_prefers_newest_and_owner_email(self):
+        rows = [
+            {
+                "id": "1",
+                "email": "other@example.com",
+                "file": "https://files.garena.vn/garena-social/public/2026/4/22/old.png",
+                "createdAt": "2026-04-22T08:30:00.000Z",
+            },
+            {
+                "id": "2",
+                "email": "owner@example.com",
+                "file": "https://files.garena.vn/garena-social/public/2026/4/22/new-owner.png",
+                "createdAt": "2026-04-22T08:45:00.000Z",
+            },
+            {
+                "id": "3",
+                "email": "owner@example.com",
+                "file": "https://files.garena.vn/garena-social/public/2026/4/22/newer-owner.png",
+                "createdAt": "2026-04-22T08:46:00.000Z",
+            },
+        ]
+        selected = _pick_new_vendor_url(
+            rows,
+            before_urls={"https://files.garena.vn/garena-social/public/2026/4/22/old.png"},
+            public_url_prefix="https://files.garena.vn/garena-social/public/",
+            owner_email="owner@example.com",
+        )
+        self.assertEqual(selected, "https://files.garena.vn/garena-social/public/2026/4/22/newer-owner.png")
 
     def test_convert_image_to_png_rewrites_webp_output_for_seatalk(self):
         with tempfile.TemporaryDirectory() as tmp:

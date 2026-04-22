@@ -643,7 +643,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
 
             try:
-                final_url = upload_image_to_vendor_tool(image_path)
+                final_url = upload_image_to_vendor_tool(
+                    image_path,
+                    owner_email=callback_context.get("email", ""),
+                )
             except UploadImageError as exc:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
                 with private_message_lock:
@@ -726,7 +729,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         employee_code,
                         exc,
                     )
-                    final_url = upload_image_to_vendor_tool(output_path)
+                    final_url = upload_image_to_vendor_tool(
+                        output_path,
+                        owner_email=callback_context.get("email", ""),
+                    )
                     LOGGER.info(
                         "Removebg fallback to Vendor Tool link succeeded | employee_code=%s | final_url=%s",
                         employee_code,

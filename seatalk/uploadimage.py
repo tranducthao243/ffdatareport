@@ -430,6 +430,30 @@ def _pick_new_vendor_url(
     return candidates[0][1]
 
 
+def _is_upload_file_tool_response(response) -> bool:
+    if "/graphql" not in response.url:
+        return False
+    request = response.request
+    post_data = ""
+    try:
+        post_data = str(request.post_data or "")
+    except Exception:
+        post_data = ""
+    if "uploadFileTool" in post_data:
+        return True
+    try:
+        request_payload = request.post_data_json
+        if isinstance(request_payload, dict):
+            if str(request_payload.get("operationName") or "").strip() == "uploadFileTool":
+                return True
+            query = str(request_payload.get("query") or "")
+            if "uploadFileTool" in query:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -585,7 +609,7 @@ def remove_background_with_space(image_path: Path) -> Path:
     return output_path
 
 
-def upload_image_to_vendor_tool(image_path: Path) -> str:
+def upload_image_to_vendor_tool(image_path: Path, *, owner_email: str = "") -> str:
     upload_url = os.getenv("VENDOR_UPLOAD_TOOL_URL", DEFAULT_VENDOR_UPLOAD_URL).strip() or DEFAULT_VENDOR_UPLOAD_URL
     auth_token = os.getenv("VENDOR_AUTH_TOKEN", "").strip()
     cookie_name = os.getenv("VENDOR_AUTH_COOKIE_NAME", "token").strip() or "token"
@@ -597,7 +621,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
     headless = os.getenv("VENDOR_UPLOAD_HEADLESS", "true").strip().lower() not in {"0", "false", "no"}
     timeout_ms = int(os.getenv("VENDOR_UPLOAD_TIMEOUT_MS", "60000").strip() or "60000")
     result_timeout_ms = int(os.getenv("VENDOR_UPLOAD_RESULT_TIMEOUT_MS", "15000").strip() or "15000")
-    owner_email = os.getenv("VENDOR_OWNER_EMAIL", "").strip().lower()
+    owner_email = (owner_email or os.getenv("VENDOR_OWNER_EMAIL", "")).strip().lower()
 
     if not auth_token:
         raise UploadImageError("Missing VENDOR_AUTH_TOKEN.")
@@ -630,28 +654,6 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             ]
         )
         page = context.new_page()
-        graphql_events: list[dict[str, Any]] = []
-
-        def on_response(response) -> None:
-            if "/graphql" not in response.url:
-                return
-            try:
-                payload = response.json()
-            except Exception:
-                payload = {}
-            try:
-                request_payload = response.request.post_data_json
-            except Exception:
-                request_payload = {}
-            graphql_events.append(
-                {
-                    "status": response.status,
-                    "request": request_payload,
-                    "response": payload,
-                }
-            )
-
-        page.on("response", on_response)
 
         try:
             page.goto(upload_url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -693,30 +695,41 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         )
         _log_flow_step("vendor_upload", "snapshot_before_save", "ok", row_count=len(existing_rows))
 
-        file_input.set_input_files(str(image_path))
+        upload_response_payload: dict[str, Any] = {}
+        upload_response_status = 0
+        upload_response_captured = False
+        file_set = False
+        try:
+            with page.expect_response(_is_upload_file_tool_response, timeout=min(timeout_ms, 30000)) as upload_response_info:
+                file_input.set_input_files(str(image_path))
+                file_set = True
+            upload_response = upload_response_info.value
+            upload_response_status = upload_response.status
+            upload_response_payload = upload_response.json()
+            upload_response_captured = True
+            LOGGER.info(
+                "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
+                upload_response_status,
+                upload_response_payload,
+            )
+        except PlaywrightTimeoutError:
+            if not file_set:
+                file_input.set_input_files(str(image_path))
+            LOGGER.warning(
+                "Vendor GraphQL uploadFileTool response was not captured in time; continue with post-save snapshot validation | image_path=%s",
+                image_path,
+            )
+            _log_flow_step("vendor_upload", "graphql_upload_confirm", "warn", reason="response_not_captured")
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
         try:
             upload_state = _wait_for_vendor_upload_ready(page, timeout_ms=min(timeout_ms, 20000))
-            upload_confirmed = False
-            deadline = time.monotonic() + 20
-            while time.monotonic() < deadline:
-                for event in graphql_events:
-                    response_payload = event.get("response") or {}
-                    data = response_payload.get("data") or {}
-                    if data.get("uploadFileTool") is True:
-                        upload_confirmed = True
-                        LOGGER.info(
-                            "Vendor GraphQL uploadFileTool response | status=%s | payload=%s",
-                            event.get("status"),
-                            response_payload,
-                        )
-                        break
-                if upload_confirmed:
-                    break
-                page.wait_for_timeout(500)
-            if not upload_confirmed:
-                raise UploadImageError("Khong nhan duoc xac nhan GraphQL uploadFileTool=true sau khi chon file.")
+            if upload_response_captured:
+                if (upload_response_payload.get("data") or {}).get("uploadFileTool") is not True:
+                    raise UploadImageError(
+                        f"Vendor GraphQL uploadFileTool response invalid: status={upload_response_status}, payload={upload_response_payload}"
+                    )
+                _log_flow_step("vendor_upload", "graphql_upload_confirm", "ok", status=upload_response_status)
             page.wait_for_timeout(1000)
             _log_flow_step(
                 "vendor_upload",
