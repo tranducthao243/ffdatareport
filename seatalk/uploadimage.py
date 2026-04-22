@@ -184,6 +184,32 @@ def _extract_top_row_public_url(page, *, public_url_prefix: str) -> str:
     return urls[0] if urls else ""
 
 
+def _extract_vendor_table_rows(page) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    row_locator = page.locator("tbody tr")
+    row_count = row_locator.count()
+    for index in range(row_count):
+        row = row_locator.nth(index)
+        cells = row.locator("td")
+        if cells.count() < 4:
+            continue
+        file_url = cells.nth(1).inner_text().strip()
+        file_name = cells.nth(2).inner_text().strip()
+        created_at = cells.nth(3).inner_text().strip()
+        if not file_url:
+            anchors = cells.nth(1).locator("a")
+            if anchors.count() > 0:
+                file_url = anchors.first.inner_text().strip()
+        rows.append(
+            {
+                "file_url": file_url,
+                "file_name": file_name,
+                "created_at": created_at,
+            }
+        )
+    return rows
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -366,13 +392,18 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             browser.close()
             raise UploadImageError("Upload input not found on vendor tool page.")
 
-        existing_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-        existing_row_count = page.locator("tbody tr").count()
+        existing_rows = _extract_vendor_table_rows(page)
+        existing_urls = [
+            row["file_url"]
+            for row in existing_rows
+            if row.get("file_url", "").startswith(public_url_prefix)
+        ]
+        existing_row_count = len(existing_rows)
         LOGGER.info(
-            "Vendor URLs before save | image_path=%s | row_count=%s | urls=%s",
+            "Vendor URLs before save | image_path=%s | row_count=%s | rows=%s",
             image_path,
             existing_row_count,
-            existing_urls,
+            existing_rows,
         )
 
         upload_response_urls: list[str] = []
@@ -450,7 +481,10 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         page.on("response", _capture_response)
 
         try:
-            page.get_by_role("button", name="Save").click(timeout=timeout_ms)
+            try:
+                page.get_by_role("button", name="Save").click(timeout=timeout_ms)
+            except PlaywrightTimeoutError:
+                page.locator("button[type='submit'].ant-btn-primary").first.click(timeout=timeout_ms)
             LOGGER.info("Vendor save click success | image_path=%s", image_path)
         except PlaywrightTimeoutError as exc:
             LOGGER.error("Vendor save click failed | image_path=%s", image_path)
@@ -464,26 +498,37 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             len(existing_urls),
         )
         deadline = time.monotonic() + (result_timeout_ms / 1000)
-        final_candidates: list[str] = []
+        final_candidates: list[dict[str, str]] = []
         final_row_count = existing_row_count
         while time.monotonic() < deadline:
             try:
                 page.reload(wait_until="domcontentloaded", timeout=timeout_ms)
             except PlaywrightTimeoutError:
                 LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
-            current_urls = _extract_public_urls(page.content(), public_url_prefix=public_url_prefix)
-            current_row_count = page.locator("tbody tr").count()
+            current_rows = _extract_vendor_table_rows(page)
+            current_row_count = len(current_rows)
+            response_new_urls = [url for url in captured_response_urls if url not in existing_urls]
+            table_new_rows = [
+                row
+                for row in current_rows
+                if row.get("file_url", "").startswith(public_url_prefix)
+                and row.get("file_url", "") not in existing_urls
+            ]
             final_candidates = []
-            for url in captured_response_urls + current_urls:
-                if url not in existing_urls and url not in final_candidates:
-                    final_candidates.append(url)
+            for row in table_new_rows:
+                if row not in final_candidates:
+                    final_candidates.append(row)
+            if response_new_urls:
+                final_candidates = [
+                    row for row in final_candidates if row.get("file_url", "") in response_new_urls
+                ] or final_candidates
             if len(final_candidates) == 1:
                 final_row_count = current_row_count
                 break
             page.wait_for_timeout(1000)
 
         LOGGER.info(
-            "Vendor URLs after save | image_path=%s | row_count=%s | new_urls=%s | response_urls=%s",
+            "Vendor URLs after save | image_path=%s | row_count=%s | new_rows=%s | response_urls=%s",
             image_path,
             final_row_count,
             final_candidates,
@@ -495,7 +540,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         LOGGER.error("Vendor result URL ambiguous | image_path=%s | candidates=%s", image_path, final_candidates)
         raise UploadImageError("Vendor Tool tra ve nhieu link moi cung luc, khong xac dinh duoc link cua anh vua upload.")
 
-    final_url = final_candidates[0] if final_candidates else ""
+    final_url = final_candidates[0].get("file_url", "") if final_candidates else ""
     if not final_url.startswith(public_url_prefix):
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
         raise UploadImageError("Da bam Save nhung khong thay public URL moi nao xuat hien sau khi luu.")
