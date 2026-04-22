@@ -55,7 +55,7 @@ from .uploadimage import (
 
 
 LOGGER = logging.getLogger("seatalk.callback_server")
-SEATALK_DIRECT_IMAGE_REPLY_ENABLED = os.getenv("SEATALK_DIRECT_IMAGE_REPLY_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED = os.getenv("SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 PRIVATE_FUTURE_FEATURE_MESSAGE = (
@@ -596,7 +596,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 (
                     "**Da nhan anh gan nhat cua ban**\n"
                     "*Go `uploadimage` de tai anh len web noi bo va nhan link ket qua.*\n"
-                    "*Go `removebg` de tach nen anh va nhan link PNG ket qua.*"
+                    "*Go `removebg` de tach nen anh va tra lai anh ket qua.*"
                 ),
             )
 
@@ -717,10 +717,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
                 )
                 try:
-                    if not SEATALK_DIRECT_IMAGE_REPLY_ENABLED:
-                        raise SeaTalkError("SeaTalk direct image reply disabled; using vendor fallback.")
                     send_seatalk_image_reply(private_client, output_path)
                 except SeaTalkError as exc:
+                    if not SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED:
+                        raise UploadImageError(f"SeaTalk private image reply failed: {exc}") from exc
                     LOGGER.warning(
                         "SeaTalk direct image reply failed for removebg; falling back to Vendor Tool link | employee_code=%s | error=%s",
                         employee_code,

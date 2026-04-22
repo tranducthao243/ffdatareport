@@ -423,7 +423,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["employee_code"], "e_123")
         self.assertEqual(kwargs["json"]["thread_id"], "message-1")
 
-    def test_send_image_bytes_uses_image_base64_message(self):
+    def test_send_image_bytes_uses_image_content_message(self):
         client = SeaTalkClient(
             SeaTalkSettings(
                 app_id="app",
@@ -445,7 +445,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["message"]["tag"], "image")
         self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
         self.assertEqual(kwargs["json"]["quoted_message_id"], "message-1")
-        content = kwargs["json"]["message"]["image_base64"]["content"]
+        content = kwargs["json"]["message"]["image"]["content"]
         self.assertEqual(base64.b64decode(content.encode("ascii")), b"png-bytes")
 
     def test_send_image_url_uses_image_content_message(self):

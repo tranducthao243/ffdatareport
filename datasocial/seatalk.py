@@ -74,7 +74,7 @@ class SeaTalkClient:
         return self.send_message(
             {
                 "tag": "image",
-                "image_base64": {
+                "image": {
                     "content": encoded,
                 },
             }

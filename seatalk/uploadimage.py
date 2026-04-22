@@ -311,6 +311,41 @@ def _wait_for_vendor_table_rows(page, *, timeout_ms: int) -> list[dict[str, str]
     return latest_rows
 
 
+def _read_vendor_upload_state(page) -> dict[str, int | bool]:
+    return page.evaluate(
+        """() => {
+            const uploading = document.querySelectorAll('.ant-upload-list-item-uploading').length;
+            const done = document.querySelectorAll('.ant-upload-list-item-done').length;
+            const error = document.querySelectorAll('.ant-upload-list-item-error').length;
+            const totalItems = document.querySelectorAll('.ant-upload-list-item').length;
+            const saveBtn = document.querySelector("button[type='submit'].ant-btn-primary");
+            const saveDisabled = !!(saveBtn && (saveBtn.disabled || saveBtn.classList.contains('ant-btn-loading')));
+            return { uploading, done, error, totalItems, saveDisabled };
+        }"""
+    )
+
+
+def _wait_for_vendor_upload_ready(page, *, timeout_ms: int) -> dict[str, int | bool]:
+    deadline = time.monotonic() + (timeout_ms / 1000)
+    last_state: dict[str, int | bool] = {}
+    while time.monotonic() < deadline:
+        last_state = _read_vendor_upload_state(page)
+        upload_in_progress = int(last_state.get("uploading") or 0) > 0
+        has_error = int(last_state.get("error") or 0) > 0
+        has_uploaded_file = int(last_state.get("done") or 0) > 0 or int(last_state.get("totalItems") or 0) > 0
+        save_enabled = not bool(last_state.get("saveDisabled"))
+        if has_uploaded_file and not upload_in_progress and not has_error and save_enabled:
+            return last_state
+        page.wait_for_timeout(600)
+    raise UploadImageError(
+        "Vendor Tool chua upload xong file vao he thong (state="
+        f"uploading={last_state.get('uploading', '-')}, "
+        f"done={last_state.get('done', '-')}, "
+        f"error={last_state.get('error', '-')}, "
+        f"save_disabled={last_state.get('saveDisabled', '-')})."
+    )
+
+
 def summarize_upload_error(exc: Exception) -> str:
     text = str(exc or "").strip()
     lowered = text.lower()
@@ -537,7 +572,6 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             if row.get("file_url", "").startswith(public_url_prefix)
         ]
         existing_row_count = len(existing_rows)
-        existing_top_row = existing_rows[0] if existing_rows else {"file_url": "", "file_name": "", "created_at": ""}
         LOGGER.info(
             "Vendor URLs before save | image_path=%s | row_count=%s | rows=%s",
             image_path,
@@ -550,24 +584,21 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
         page.get_by_text(image_path.name, exact=False).wait_for(timeout=timeout_ms)
         _log_flow_step("vendor_upload", "select_file", "ok", image_name=image_path.name)
         try:
-            page.wait_for_function(
-                """() => {
-                    const uploading = document.querySelectorAll('.ant-upload-list-item-uploading').length;
-                    const done = document.querySelectorAll('.ant-upload-list-item-done').length;
-                    return uploading === 0 && done > 0;
-                }""",
-                timeout=min(timeout_ms, 8000),
-            )
+            upload_state = _wait_for_vendor_upload_ready(page, timeout_ms=min(timeout_ms, 20000))
             page.wait_for_timeout(1000)
-            _log_flow_step("vendor_upload", "wait_upload_component", "ok", image_name=image_path.name)
-            LOGGER.info("Vendor upload component finished | image_path=%s", image_path)
-        except PlaywrightTimeoutError:
-            _log_flow_step("vendor_upload", "wait_upload_component", "warn", image_name=image_path.name)
-            LOGGER.warning(
-                "Vendor upload component did not expose a done state before timeout | image_path=%s",
-                image_path,
+            _log_flow_step(
+                "vendor_upload",
+                "wait_upload_component",
+                "ok",
+                image_name=image_path.name,
+                uploading=upload_state.get("uploading"),
+                done=upload_state.get("done"),
+                errors=upload_state.get("error"),
             )
-            page.wait_for_timeout(2000)
+            LOGGER.info("Vendor upload component ready for save | image_path=%s | upload_state=%s", image_path, upload_state)
+        except UploadImageError:
+            _log_flow_step("vendor_upload", "wait_upload_component", "fail", image_name=image_path.name)
+            raise
         _log_flow_step("vendor_upload", "upload_to_component", "ok", image_path=image_path)
         LOGGER.info("Vendor upload success | image_path=%s", image_path)
 
@@ -593,6 +624,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 _log_flow_step("vendor_upload", "unset_sensitive_checkbox", "fail", image_path=image_path)
                 LOGGER.exception("Vendor checkbox state change failed | image_path=%s", image_path)
 
+        save_started_at = datetime.now()
         try:
             try:
                 page.get_by_role("button", name="Save").click(timeout=timeout_ms)
@@ -613,7 +645,7 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
             len(existing_urls),
         )
         deadline = time.monotonic() + (result_timeout_ms / 1000)
-        final_candidates: list[dict[str, str]] = []
+        final_candidate: dict[str, str] | None = None
         final_row_count = existing_row_count
         while time.monotonic() < deadline:
             try:
@@ -622,44 +654,53 @@ def upload_image_to_vendor_tool(image_path: Path) -> str:
                 LOGGER.warning("Vendor page reload timed out while waiting for result | image_path=%s", image_path)
             current_rows = _wait_for_vendor_table_rows(page, timeout_ms=3000)
             current_row_count = len(current_rows)
-            current_top_row = current_rows[0] if current_rows else {"file_url": "", "file_name": "", "created_at": ""}
-            final_candidates = []
-            if (
-                current_top_row.get("file_url", "").startswith(public_url_prefix)
-                and current_top_row.get("file_url", "") not in existing_urls
-                and (
-                    current_top_row.get("created_at", "") != existing_top_row.get("created_at", "")
-                    or current_top_row.get("file_url", "") != existing_top_row.get("file_url", "")
-                )
-            ):
-                final_candidates.append(current_top_row)
-            if len(final_candidates) == 1:
+            new_rows = [
+                row
+                for row in current_rows
+                if row.get("file_url", "").startswith(public_url_prefix)
+                and row.get("file_url", "") not in existing_urls
+            ]
+            recent_new_rows: list[dict[str, str]] = []
+            for row in new_rows:
+                created_at = str(row.get("created_at") or "").strip()
+                if not created_at:
+                    recent_new_rows.append(row)
+                    continue
+                parsed_created_at: datetime | None = None
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                    try:
+                        parsed_created_at = datetime.strptime(created_at, fmt)
+                        break
+                    except ValueError:
+                        continue
+                if parsed_created_at is None:
+                    recent_new_rows.append(row)
+                    continue
+                if parsed_created_at >= save_started_at.replace(microsecond=0):
+                    recent_new_rows.append(row)
+            candidates = recent_new_rows or new_rows
+            if candidates:
+                final_candidate = candidates[0]
                 final_row_count = current_row_count
                 break
             page.wait_for_timeout(1000)
 
         LOGGER.info(
-            "Vendor URLs after save | image_path=%s | row_count=%s | top_before=%s | new_rows=%s",
+            "Vendor URLs after save | image_path=%s | row_count=%s | final_candidate=%s",
             image_path,
             final_row_count,
-            existing_top_row,
-            final_candidates,
+            final_candidate,
         )
         _log_flow_step(
             "vendor_upload",
             "read_rows_after_save",
-            "ok" if len(final_candidates) == 1 else "warn",
+            "ok" if final_candidate else "warn",
             row_count=final_row_count,
-            candidates=len(final_candidates),
+            candidates=1 if final_candidate else 0,
         )
         browser.close()
 
-    if len(final_candidates) > 1:
-        _log_flow_step("vendor_upload", "finalize_public_url", "fail", candidates=len(final_candidates))
-        LOGGER.error("Vendor result URL ambiguous | image_path=%s | candidates=%s", image_path, final_candidates)
-        raise UploadImageError("Vendor Tool tra ve nhieu link moi cung luc, khong xac dinh duoc link cua anh vua upload.")
-
-    final_url = final_candidates[0].get("file_url", "") if final_candidates else ""
+    final_url = final_candidate.get("file_url", "") if final_candidate else ""
     if not final_url.startswith(public_url_prefix):
         _log_flow_step("vendor_upload", "finalize_public_url", "fail", image_path=image_path)
         LOGGER.error("Vendor result URL not found | image_path=%s", image_path)
