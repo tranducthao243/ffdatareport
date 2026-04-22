@@ -592,8 +592,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             send_seatalk_text_reply(
                 client,
                 (
-                    "**Đã nhận ảnh gần nhất của bạn**\n"
-                    "*Gõ `uploadimage` để tải ảnh lên web nội bộ và nhận link kết quả.*"
+                    "**Da nhan anh gan nhat cua ban**\n"
+                    "*Go `uploadimage` de tai anh len web noi bo va nhan link ket qua.*\n"
+                    "*Go `removebg` de tai anh len web tach nen va tra lai anh ket qua.*"
                 ),
             )
 
@@ -806,4 +807,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
 
