@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,16 @@ class UnifiedUser:
     seatalk_user_id: str = ""
     gmail: str = ""
     name: str = ""
+
+
+def _split_env_values(*raw_values: str) -> list[str]:
+    values: list[str] = []
+    for raw in raw_values:
+        for token in str(raw or "").replace(";", ",").split(","):
+            value = token.strip()
+            if value and value not in values:
+                values.append(value)
+    return values
 
 
 def load_user_directory(path: Path) -> list[UnifiedUser]:
@@ -40,21 +51,68 @@ def load_user_directory(path: Path) -> list[UnifiedUser]:
     return users
 
 
-def build_unified_user(callback_context: dict[str, str], directory: list[UnifiedUser]) -> dict[str, Any]:
+def load_env_role_directory() -> list[UnifiedUser]:
+    users: list[UnifiedUser] = []
+
+    for employee_code in _split_env_values(
+        os.getenv("SEATALK_SUPERADMIN_EMPLOYEE_CODES", ""),
+        os.getenv("SEATALK_SUPERADMIN_EMPLOYEE_CODE", ""),
+    ):
+        users.append(UnifiedUser(role="superadmin", employee_code=employee_code))
+    for email in _split_env_values(
+        os.getenv("SEATALK_SUPERADMIN_EMAILS", ""),
+        os.getenv("SEATALK_SUPERADMIN_EMAIL", ""),
+    ):
+        users.append(UnifiedUser(role="superadmin", email=email.lower()))
+    for seatalk_user_id in _split_env_values(
+        os.getenv("SEATALK_SUPERADMIN_SEATALK_IDS", ""),
+        os.getenv("SEATALK_SUPERADMIN_SEATALK_ID", ""),
+    ):
+        users.append(UnifiedUser(role="superadmin", seatalk_user_id=seatalk_user_id))
+
+    for employee_code in _split_env_values(
+        os.getenv("SEATALK_ADMIN_EMPLOYEE_CODES", ""),
+        os.getenv("SEATALK_ADMIN_EMPLOYEE_CODE", ""),
+    ):
+        users.append(UnifiedUser(role="admin", employee_code=employee_code))
+    for email in _split_env_values(
+        os.getenv("SEATALK_ADMIN_EMAILS", ""),
+        os.getenv("SEATALK_ADMIN_EMAIL", ""),
+    ):
+        users.append(UnifiedUser(role="admin", email=email.lower()))
+    for seatalk_user_id in _split_env_values(
+        os.getenv("SEATALK_ADMIN_SEATALK_IDS", ""),
+        os.getenv("SEATALK_ADMIN_SEATALK_ID", ""),
+    ):
+        users.append(UnifiedUser(role="admin", seatalk_user_id=seatalk_user_id))
+
+    return users
+
+
+def _match_user(callback_context: dict[str, str], directory: list[UnifiedUser]) -> UnifiedUser | None:
     employee_code = str(callback_context.get("employee_code") or "").strip()
     email = str(callback_context.get("email") or "").strip().lower()
     seatalk_user_id = str(callback_context.get("seatalk_id") or "").strip()
-    matched = None
     for user in directory:
         if employee_code and user.employee_code == employee_code:
-            matched = user
-            break
+            return user
         if email and user.email == email:
-            matched = user
-            break
+            return user
         if seatalk_user_id and user.seatalk_user_id == seatalk_user_id:
-            matched = user
-            break
+            return user
+    return None
+
+
+def build_unified_user(
+    callback_context: dict[str, str],
+    directory: list[UnifiedUser],
+    *,
+    env_directory: list[UnifiedUser] | None = None,
+) -> dict[str, Any]:
+    employee_code = str(callback_context.get("employee_code") or "").strip()
+    email = str(callback_context.get("email") or "").strip().lower()
+    seatalk_user_id = str(callback_context.get("seatalk_id") or "").strip()
+    matched = _match_user(callback_context, env_directory or []) or _match_user(callback_context, directory)
     role = matched.role if matched else "guest"
     gmail = matched.gmail if matched else ""
     name = matched.name if matched else ""

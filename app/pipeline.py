@@ -101,7 +101,7 @@ def build_configured_reports(
             package["chartPath"] = str(
                 build_kol_30d_chart(
                     db_path,
-                    title=f"{package['title']} - Daily Views 30 Days",
+                    title="Biểu Đồ View KOLs 30 ngày gần nhất",
                     now=now,
                 )
             )

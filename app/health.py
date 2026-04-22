@@ -48,7 +48,7 @@ def format_issue_label(code: str) -> str:
 
 
 def normalize_command_text(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text or "")
+    normalized = unicodedata.normalize("NFKD", (text or "").replace("đ", "d").replace("Đ", "D"))
     ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     return " ".join(ascii_text.strip().lower().split())
 

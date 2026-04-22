@@ -33,7 +33,7 @@ from datasocial.presets import load_preset
 from datasocial.seatalk import SeaTalkError
 
 from .auth import build_seatalk_client
-from .identity import build_unified_user, get_superadmins, load_user_directory
+from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .callbacks import (
     SeatalkCallbackError,
     build_callback_context,
@@ -67,24 +67,11 @@ PRIVATE_FUTURE_FEATURE_MESSAGE = (
 
 def _is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
     directory = runtime.get("user_directory") or []
-    if not directory and not (
-        runtime.get("admin_employee_codes") or runtime.get("admin_emails") or runtime.get("admin_seatalk_ids")
-    ):
+    env_directory = runtime.get("env_role_directory") or []
+    if not directory and not env_directory:
         return True
-    unified_user = build_unified_user(callback_context, directory)
-    if unified_user["role"] in {"admin", "superadmin"}:
-        return True
-    employee_code = unified_user["employee_code"]
-    email = unified_user["email"]
-    seatalk_id = unified_user["seatalk_user_id"]
-    admin_codes = set(runtime.get("admin_employee_codes") or [])
-    admin_emails = set(runtime.get("admin_emails") or [])
-    admin_seatalk_ids = set(runtime.get("admin_seatalk_ids") or [])
-    return (
-        employee_code in admin_codes
-        or (email and email in admin_emails)
-        or (seatalk_id and seatalk_id in admin_seatalk_ids)
-    )
+    unified_user = build_unified_user(callback_context, directory, env_directory=env_directory)
+    return unified_user["role"] in {"admin", "superadmin"}
 
 
 def _format_private_access_denied(callback_context: dict[str, str], *, contact_email: str) -> str:
@@ -146,24 +133,8 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
     preset = load_preset(args.preset)
     preset_data = preset.data
     user_directory = load_user_directory(Path(os.getenv("SEATALK_USERS_CONFIG", "config/users.json")))
-    admin_codes: list[str] = []
-    for raw in (os.getenv("SEATALK_ADMIN_EMPLOYEE_CODES", ""), os.getenv("SEATALK_ADMIN_EMPLOYEE_CODE", "")):
-        for token in raw.replace(";", ",").split(","):
-            value = token.strip()
-            if value and value not in admin_codes:
-                admin_codes.append(value)
-    admin_emails: list[str] = []
-    for raw in (os.getenv("SEATALK_ADMIN_EMAILS", ""), os.getenv("SEATALK_ADMIN_EMAIL", "")):
-        for token in raw.replace(";", ",").split(","):
-            value = token.strip().lower()
-            if value and value not in admin_emails:
-                admin_emails.append(value)
-    admin_seatalk_ids: list[str] = []
-    for raw in (os.getenv("SEATALK_ADMIN_SEATALK_IDS", ""), os.getenv("SEATALK_ADMIN_SEATALK_ID", "")):
-        for token in raw.replace(";", ",").split(","):
-            value = token.strip()
-            if value and value not in admin_seatalk_ids:
-                admin_seatalk_ids.append(value)
+    env_role_directory = load_env_role_directory()
+    superadmin_users = get_superadmins(env_role_directory) or get_superadmins(user_directory)
     return {
         "db_path": args.db_path,
         "groups_config": args.groups_config,
@@ -182,12 +153,10 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "signing_secret": args.signing_secret,
         "seatalk_app_id": os.getenv("SEATALK_APP_ID", "").strip(),
         "seatalk_app_secret": os.getenv("SEATALK_APP_SECRET", "").strip(),
-        "admin_employee_codes": admin_codes,
-        "admin_emails": admin_emails,
-        "admin_seatalk_ids": admin_seatalk_ids,
         "admin_contact_email": os.getenv("SEATALK_ADMIN_CONTACT_EMAIL", "ducthao.tran@garena.vn").strip(),
         "user_directory": user_directory,
-        "superadmin_users": get_superadmins(user_directory),
+        "env_role_directory": env_role_directory,
+        "superadmin_users": superadmin_users,
         "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
     }
 
@@ -561,6 +530,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "**Tiện ích**\n"
                     "- `web`: liệt kê các link web quan trọng của team\n"
                     "- `hashtag`: gõ hashtag và tên hashtag để check data\n"
+                    "- `kol`: gõ `kol <tên KOL>` để check data theo KOL\n"
                     "\n"
                     "**Dữ liệu KOLs**\n"
                     "- `campaign`: báo cáo campaign hiện tại\n"
@@ -568,9 +538,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "- `dance`: báo cáo video trend nhảy\n"
                     "- `roblox`: báo cáo TOP video Roblox\n"
                     "\n"
-                    "**Tính năng sắp cập nhật**\n"
+                    "**Tính năng khác**\n"
                     "- `shortlink`: tạo shortlink từ link và config\n"
-                    "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh\n"
+                    "- `imagelink` / `uploadimage`: tải ảnh lên web nội bộ và trả link ảnh\n"
                     "- `enhanceimage`: làm nét ảnh rồi trả kết quả\n"
                     "- `removebg`: tách nền ảnh và trả lại ảnh\n"
                     "\n"
@@ -584,7 +554,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     now=datetime.now(),
                 ) or (
                     "**Tôi chưa hiểu câu hỏi này**\n"
-                    "*Thử lại bằng một lệnh như `health`, `campaign`, `official` "
+                    "*Thử lại bằng một lệnh như `health`, `campaign`, `official`, `kol <tên KOL>` "
                     "hoặc một câu hỏi dữ liệu cụ thể.*"
                 )
 
@@ -619,7 +589,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             send_seatalk_text_reply(
                 client,
-                "Đã nhận ảnh gần nhất của bạn.\nGõ 'uploadimage' để tải ảnh lên web nội bộ.\nGõ 'removebg' để tách nền ảnh.",
+                "Đã nhận ảnh gần nhất của bạn.\nGõ 'imagelink' để tải ảnh lên web nội bộ.\nGõ 'removebg' để tách nền ảnh.",
             )
 
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:

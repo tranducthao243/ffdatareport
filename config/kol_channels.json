@@ -2,8 +2,21 @@
   "kols": [
     {
       "name": "Hieu Dau Da",
-      "aliases": ["hieudauda"],
-      "channels": []
+      "aliases": ["hieudauda", "hieu dau da", "hiếu đầu đà"],
+      "channels": [
+        {
+          "platform": "youtube",
+          "channelName": "Hieu Dau Da"
+        },
+        {
+          "platform": "tiktok",
+          "channelName": "Hieu Dau Da"
+        },
+        {
+          "platform": "facebook",
+          "channelName": "Hieu Dau Da"
+        }
+      ]
     }
   ]
 }

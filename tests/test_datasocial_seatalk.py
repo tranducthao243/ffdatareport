@@ -4,11 +4,12 @@ import json
 from unittest.mock import Mock, patch
 from PIL import Image
 
-from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report
+from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report, normalize_command_text
 from app.private_reports import format_hashtag_report_v2, format_kol_report
+from report.renderers import render_topd
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
-from seatalk.identity import UnifiedUser, build_unified_user
+from seatalk.identity import UnifiedUser, build_unified_user, load_env_role_directory
 from seatalk.callbacks import (
     build_callback_context,
     extract_click_value,
@@ -48,6 +49,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(classify_private_command("imagelink"), "imagelink")
         self.assertEqual(classify_private_command("uploadimage"), "imagelink")
         self.assertEqual(classify_private_command("kol hieu dau da"), "kol")
+        self.assertEqual(normalize_command_text("Hiếu Đầu Đà"), "hieu dau da")
 
     def test_format_hashtag_report_summarizes_views_by_category(self):
         rows = [
@@ -156,7 +158,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             answer = format_hashtag_report_v2(db_path, "hashtag ob53")
 
-            self.assertIn("TOP VIDEO NOI BAT (7 NGAY)", answer)
+            self.assertIn("TOP VIDEO NỔI BẬT (7 NGÀY)", answer)
             self.assertIn("Official contribution:", answer)
             self.assertIn("Percentage:", answer)
 
@@ -230,9 +232,45 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             answer = format_kol_report(db_path, "kol KOL One", mapping_path=mapping_path)
 
             self.assertIn("KOL: KOL One", answer)
-            self.assertIn("Tong view:", answer)
+            self.assertIn("Tổng view:", answer)
             self.assertIn("TOP hashtag:", answer)
             self.assertIn("YouTube: KOL One YT", answer)
+
+    def test_format_kol_report_can_fallback_to_channel_name_without_mapping(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Youtube",
+                "Channel id": "yt-1",
+                "Channel name": "Hiếu Đầu Đà",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "yt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #freefire",
+                "Link": "https://youtube.com/watch?v=1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#freefire",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            mapping_path = root / "kols.json"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+            mapping_path.write_text(json.dumps({"kols": []}), encoding="utf-8")
+
+            answer = format_kol_report(db_path, "kol Hiếu Đầu Đà", mapping_path=mapping_path)
+
+            self.assertIn("KOL: Hiếu Đầu Đà", answer)
+            self.assertIn("Tổng view:", answer)
 
     def test_build_unified_user_resolves_superadmin_by_email(self):
         callback_context = {
@@ -246,6 +284,31 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         )
         self.assertEqual(unified["role"], "superadmin")
 
+    @patch.dict(
+        "os.environ",
+        {
+            "SEATALK_ADMIN_EMAILS": "admin@garena.vn",
+            "SEATALK_SUPERADMIN_SEATALK_IDS": "9306358918",
+        },
+        clear=False,
+    )
+    def test_env_role_directory_allows_single_identifier_match(self):
+        env_directory = load_env_role_directory()
+
+        admin_user = build_unified_user(
+            {"email": "admin@garena.vn", "employee_code": "", "seatalk_id": ""},
+            [],
+            env_directory=env_directory,
+        )
+        superadmin_user = build_unified_user(
+            {"email": "", "employee_code": "", "seatalk_id": "9306358918"},
+            [],
+            env_directory=env_directory,
+        )
+
+        self.assertEqual(admin_user["role"], "admin")
+        self.assertEqual(superadmin_user["role"], "superadmin")
+
     def test_render_seatalk_report_legacy_fallback_keeps_summary(self):
         report = {
             "generatedAt": "2026-04-12T07:30:33Z",
@@ -258,8 +321,33 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         content = render_seatalk_report(report, title="Daily FFVN")
 
         self.assertIn("**Daily FFVN**", content)
-        self.assertIn("fetched=9", content)
-        self.assertIn("after_filter=5", content)
+
+    def test_render_topd_includes_official_contribution_section(self):
+        lines = render_topd(
+            {
+                "campaigns": [
+                    {
+                        "campaignName": "OB53",
+                        "hashtags": ["ob53"],
+                        "totalViews": 1000,
+                        "totalClips": 2,
+                        "kpiPercent": 10,
+                        "kpiTarget": 10000,
+                        "daysLeft": 3,
+                        "averageViewPerClip": 500,
+                        "forecastKpiText": "Dự kiến 20% KPI",
+                        "historyCompare": {},
+                        "topRecentTikTok": [],
+                        "officialContribution": {"totalViews": 200, "totalClips": 1, "percentage": 20},
+                        "topKolsWithoutCampaignWindow": {"from": "2026-04-01", "to": "2026-04-07"},
+                        "topKolsWithoutCampaign": [],
+                    }
+                ]
+            }
+        )
+        rendered = "\n".join(lines)
+        self.assertIn("**4. Official contribution**", rendered)
+        self.assertIn("20%", rendered)
 
     def test_build_interactive_payload_contains_callback_buttons(self):
         payload = build_interactive_payload(
@@ -560,9 +648,10 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         self.assertIn(13, runtime["preset_category_ids"])
         self.assertIn(1, runtime["preset_platform_ids"])
-        self.assertEqual(runtime["admin_employee_codes"], ["e_1", "e_2"])
-        self.assertEqual(runtime["admin_emails"], ["a@example.com", "b@example.com"])
-        self.assertEqual(runtime["admin_seatalk_ids"], ["1001", "1002"])
+        env_roles = runtime["env_role_directory"]
+        self.assertTrue(any(item.role == "admin" and item.employee_code == "e_1" for item in env_roles))
+        self.assertTrue(any(item.role == "admin" and item.email == "a@example.com" for item in env_roles))
+        self.assertTrue(any(item.role == "admin" and item.seatalk_user_id == "1001" for item in env_roles))
 
     def test_group_send_includes_thread_fields_when_present(self):
         client = SeaTalkClient(

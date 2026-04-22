@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from .common import KOL_CATEGORY_IDS, KOL_PLATFORMS, average, build_days_window, filter_posts, load_posts, percentage, rank_posts
+from .common import (
+    KOL_CATEGORY_IDS,
+    KOL_PLATFORMS,
+    OFFICIAL_PLATFORMS,
+    average,
+    build_days_window,
+    filter_posts,
+    load_posts,
+    percentage,
+    rank_posts,
+)
 
 
 def analyze_topd(
@@ -38,8 +48,21 @@ def analyze_topd(
         for post in scoped
         if top_start <= post.published_date <= top_end and post.platform == "tiktok"
     ]
+    official_posts = [
+        post
+        for post in filter_posts(
+            posts,
+            start_date=current_start,
+            end_date=current_end,
+            platforms=OFFICIAL_PLATFORMS,
+            hashtag_whitelist=tags,
+        )
+        if post.is_official or post.category_id == 13
+    ]
     total_views = sum(post.view for post in scoped)
     total_clips = len(scoped)
+    official_views = sum(post.view for post in official_posts)
+    official_clips = len(official_posts)
     target = int(campaign.get("kpi_view_target", 0))
     today = (now or datetime.now()).date()
     days_left = max((datetime.fromisoformat(campaign["end_date"]).date() - today).days, 0)
@@ -113,6 +136,11 @@ def analyze_topd(
         "totalViews": total_views,
         "totalClips": total_clips,
         "topRecentTikTok": rank_posts(top_recent, limit=limit),
+        "officialContribution": {
+            "totalViews": official_views,
+            "totalClips": official_clips,
+            "percentage": percentage(official_views, total_views),
+        },
         "kpiTarget": target,
         "kpiPercent": percentage(total_views, target),
         "averageViewPerClip": average_view_per_clip,
