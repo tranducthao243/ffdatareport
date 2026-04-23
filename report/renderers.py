@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -58,7 +59,6 @@ def render_top_channels(title: str, section: dict[str, Any]) -> list[str]:
 
 def render_tope(section: dict[str, Any]) -> list[str]:
     history_compare = section.get("historyCompare") or {}
-    history_labels = section.get("historyLabels") or {}
     lines = [
         "**Tổng quan data KOL 7 ngày qua**",
         f"*Khung thời gian: `{section['window']['from']} -> {section['window']['to']}`*",
@@ -67,19 +67,43 @@ def render_tope(section: dict[str, Any]) -> list[str]:
     ]
     daily = list(section.get("daily") or [])
     if len(daily) >= 2:
-        today_views = int(daily[-1].get("totalView", 0) or 0)
-        yesterday_views = int(daily[-2].get("totalView", 0) or 0)
+        current_day = str(daily[-1].get("date", "-"))
+        previous_day = str(daily[-2].get("date", "-"))
+        current_day_views = int(daily[-1].get("totalView", 0) or 0)
+        previous_day_views = int(daily[-2].get("totalView", 0) or 0)
         lines.append(
-            f"- View ngày {daily[-1].get('date', '-')} so với ngày {daily[-2].get('date', '-')}: {format_delta(today_views - yesterday_views)}"
+            f"- View ngày {current_day} so với ngày {previous_day}: {format_delta(current_day_views - previous_day_views)}"
         )
     if history_compare.get("vsPreviousWeek"):
+        current_from = _parse_iso_date(section.get("window", {}).get("from"))
+        current_to = _parse_iso_date(section.get("window", {}).get("to"))
+        previous_from = current_from - timedelta(days=7) if current_from else None
+        previous_to = current_to - timedelta(days=7) if current_to else None
         lines.append(
-            "- Tổng view 7 ngày hiện tại so với snapshot tuần trước"
-            f" ({history_labels.get('previousWeekSnapshotDate') or '-'})"
+            f"- Tổng view giai đoạn `{section['window']['from']} -> {section['window']['to']}`"
+            f" so với giai đoạn `{_format_window_date(previous_from)} -> {_format_window_date(previous_to)}`"
             f": {format_delta(int(history_compare['vsPreviousWeek']['views']['change']))}"
         )
-    lines.extend(render_history_compare(history_compare, include_clips=False))
+        lines.append(
+            f"- Tổng clip giai đoạn `{section['window']['from']} -> {section['window']['to']}`"
+            f" so với giai đoạn `{_format_window_date(previous_from)} -> {_format_window_date(previous_to)}`"
+            f": {format_delta(int(history_compare['vsPreviousWeek']['clips']['change']))}"
+        )
     return lines
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def _format_window_date(value: date | None) -> str:
+    return value.isoformat() if value else "-"
 
 
 def render_topd(section: dict[str, Any]) -> list[str]:

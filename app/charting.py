@@ -42,14 +42,15 @@ def _build_daily_view_chart(
     output_dir = Path(tempfile.mkdtemp(prefix="seatalk-chart-"))
     output_path = output_dir / f"{filename_prefix}.png"
 
-    fig, ax = plt.subplots(figsize=(14, 5))
+    fig, ax = plt.subplots(figsize=(14, 5.4))
     ax.plot(labels, values, color="#0f6cbd", linewidth=2.6)
     ax.fill_between(labels, values, color="#cfe8ff", alpha=0.45)
-    ax.set_title(title, fontsize=18, fontweight="bold", pad=22)
+    fig.suptitle(title, fontsize=18, fontweight="bold", y=0.985)
     ax.set_ylabel("View", fontsize=12)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _position: _compact_view(value)))
     ax.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.35)
     ax.tick_params(axis="x", rotation=45, labelsize=9)
+    ax.margins(y=0.16)
 
     for tick, day in zip(ax.get_xticklabels(), dates):
         if day.weekday() in {5, 6}:
@@ -68,7 +69,7 @@ def _build_daily_view_chart(
             ax.annotate(
                 peak_text,
                 xy=(peak_index, peak_value),
-                xytext=(peak_index, peak_value + max(values) * 0.03 if max(values) else 1),
+                xytext=(peak_index, peak_value + max(values) * 0.012 if max(values) else 1),
                 fontsize=8,
                 ha="center",
                 va="bottom",
@@ -77,8 +78,8 @@ def _build_daily_view_chart(
             )
 
     fig.text(0.965, 0.95, "FFVN", ha="right", va="top", fontsize=9, color="#475569", alpha=0.85)
-    fig.subplots_adjust(top=0.84, bottom=0.2)
-    fig.tight_layout(rect=(0, 0, 1, 0.9))
+    fig.subplots_adjust(top=0.8, bottom=0.22)
+    fig.tight_layout(rect=(0, 0, 1, 0.84))
     fig.savefig(output_path, format="png", dpi=150)
     plt.close(fig)
     return output_path
@@ -146,7 +147,7 @@ def build_kol_30d_chart(
     return _build_daily_view_chart(
         daily_points,
         title=title,
-        include_weekday=True,
+        include_weekday=False,
         peak_channels=peak_channels if peak_day_iso else [],
         filename_prefix="kol-30d-chart",
     )
