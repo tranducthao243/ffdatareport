@@ -120,7 +120,15 @@ def _format_top_posts(posts: list[StorePost], *, limit: int) -> list[str]:
     ranked = sorted(posts, key=lambda item: (item.view, item.engagement, item.published_at), reverse=True)[:limit]
     if not ranked:
         return ["- Chưa có dữ liệu."]
-    return [f"{index}. {post.url} - {compact_number(post.view)}" for index, post in enumerate(ranked, start=1)]
+    return [
+        f"{index}. {post.channel_name} | {post.url} - {compact_number(post.view)}"
+        for index, post in enumerate(ranked, start=1)
+    ]
+
+
+def _format_top_posts_by_platform(posts: list[StorePost], *, platform: str, limit: int) -> list[str]:
+    scoped = [post for post in posts if post.platform == platform]
+    return _format_top_posts(scoped, limit=limit)
 
 
 def _format_top_hashtags(posts: list[StorePost], *, limit: int) -> list[str]:
@@ -211,6 +219,12 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
         "",
         "TOP 3 video:",
         *top_posts,
+        "",
+        "TOP 3 video TikTok:",
+        *_format_top_posts_by_platform(scoped, platform="tiktok", limit=3),
+        "",
+        "TOP 3 video YouTube:",
+        *_format_top_posts_by_platform(scoped, platform="youtube", limit=3),
         "",
         "TOP hashtag:",
         *top_hashtags,

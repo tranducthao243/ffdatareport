@@ -86,6 +86,50 @@ def _format_private_access_denied(callback_context: dict[str, str], *, contact_e
     )
 
 
+def _build_private_help_text(role: str) -> str:
+    lines = [
+        "**LỆNH BOT PRIVATE**",
+        "*Gõ `.` để mở nhanh menu này.*",
+        "",
+    ]
+    if role == "superadmin":
+        lines.extend(
+            [
+                "**Kiểm tra dữ liệu**",
+                "- `health`: tổng quan tình trạng dữ liệu",
+                "- `data`: kho dữ liệu đang dùng",
+                "- `scope`: source scope hiện tại",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "**Tiện ích**",
+            "- `web`: liệt kê các link web quan trọng của team",
+            "- `hashtag`: gõ hashtag và tên hashtag để check data",
+            "- `kol`: gõ `kol <tên KOL>` để check data theo KOL",
+            "",
+            "**Dữ liệu KOLs**",
+            "- `campaign`: báo cáo campaign hiện tại",
+            "- `official`: báo cáo kênh Official",
+            "- `dance`: báo cáo video trend nhảy",
+            "- `roblox`: báo cáo TOP video Roblox",
+            "",
+            "**Tính năng khác**",
+            "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",
+            "- `removebg`: tách nền ảnh và trả lại ảnh",
+            "- `shortlink`: tạo shortlink từ link và config",
+            "- `enhanceimage`: làm nét ảnh rồi trả kết quả",
+            "",
+            "**Hướng dẫn**",
+            "- `help`: xem menu này và cách dùng bot",
+            "",
+            "Bạn gõ dấu chấm `.` để gọi bảng tính năng, chỉ cần gõ lệnh là có thể gọi được dữ liệu hoặc nhờ bot giải quyết các vấn đề cần thiết. Dự kiến BOT sẽ cập nhật thêm nhiều tính năng hơn nữa. Dữ liệu từ hệ thống của Free Fire. Nếu bạn có góp ý gì vui lòng liên hệ superadmin ducthao.tran@garena.vn",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -389,10 +433,15 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 "Seatalk private message context | %s",
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
             )
+            unified_user = build_unified_user(
+                callback_context,
+                runtime.get("user_directory") or [],
+                env_directory=runtime.get("env_role_directory") or [],
+            )
             LOGGER.info(
                 "Seatalk unified user | %s",
                 json.dumps(
-                    build_unified_user(callback_context, runtime.get("user_directory") or []),
+                    unified_user,
                     ensure_ascii=False,
                     sort_keys=True,
                 ),
@@ -518,35 +567,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif command == "help":
-                reply_text = (
-                    "**LỆNH BOT PRIVATE**\n"
-                    "*Gõ `.` để mở nhanh menu này.*\n"
-                    "\n"
-                    "**Kiểm tra dữ liệu**\n"
-                    "- `health`: tổng quan tình trạng dữ liệu\n"
-                    "- `data`: kho dữ liệu đang dùng\n"
-                    "- `scope`: source scope hiện tại\n"
-                    "\n"
-                    "**Tiện ích**\n"
-                    "- `web`: liệt kê các link web quan trọng của team\n"
-                    "- `hashtag`: gõ hashtag và tên hashtag để check data\n"
-                    "- `kol`: gõ `kol <tên KOL>` để check data theo KOL\n"
-                    "\n"
-                    "**Dữ liệu KOLs**\n"
-                    "- `campaign`: báo cáo campaign hiện tại\n"
-                    "- `official`: báo cáo kênh Official\n"
-                    "- `dance`: báo cáo video trend nhảy\n"
-                    "- `roblox`: báo cáo TOP video Roblox\n"
-                    "\n"
-                    "**Tính năng khác**\n"
-                    "- `shortlink`: tạo shortlink từ link và config\n"
-                    "- `imagelink` / `uploadimage`: tải ảnh lên web nội bộ và trả link ảnh\n"
-                    "- `enhanceimage`: làm nét ảnh rồi trả kết quả\n"
-                    "- `removebg`: tách nền ảnh và trả lại ảnh\n"
-                    "\n"
-                    "**Hướng dẫn**\n"
-                    "- `help`: xem menu này và cách dùng bot\n"
-                )
+                reply_text = _build_private_help_text(unified_user.get("role", "admin"))
             else:
                 reply_text = answer_data_question(
                     runtime["db_path"],
@@ -665,10 +686,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             with private_message_lock:
                 active_uploads.discard(active_job)
-            return (
-                "**Upload ảnh thành công**\n"
-                f"- Link ảnh: {final_url}"
-            )
+            return final_url
 
         def _handle_removebg_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
@@ -692,8 +710,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 with private_message_lock:
                     active_uploads.discard(active_job)
                 return (
-                    "**Chua co anh nao de tach nen**\n"
-                    "*Hay gui mot anh cho bot truoc, sau do go `removebg`.*"
+                    "**Chưa có ảnh nào để tách nền**\n"
+                    "*Hãy gửi một ảnh cho bot trước, sau đó gõ `removebg`.*"
                 )
 
             try:

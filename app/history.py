@@ -138,6 +138,10 @@ def apply_history_deltas(
                 }
             if deltas:
                 current["historyCompare"] = deltas
+                current["historyLabels"] = {
+                    "previousDaySnapshotDate": (previous_day or {}).get("snapshotDate", ""),
+                    "previousWeekSnapshotDate": (previous_week or {}).get("snapshotDate", ""),
+                }
 
         if "TOPF" in current_sections:
             current = current_sections["TOPF"]
@@ -162,6 +166,10 @@ def apply_history_deltas(
                 }
             if deltas:
                 current["historyCompare"] = deltas
+                current["historyLabels"] = {
+                    "previousDaySnapshotDate": (previous_day or {}).get("snapshotDate", ""),
+                    "previousWeekSnapshotDate": (previous_week or {}).get("snapshotDate", ""),
+                }
 
         if "TOPD" in current_sections:
             current = current_sections["TOPD"]
@@ -184,5 +192,9 @@ def apply_history_deltas(
                     }
                 if campaign_deltas:
                     campaign["historyCompare"] = campaign_deltas
+                    campaign["historyLabels"] = {
+                        "previousDaySnapshotDate": (previous_day or {}).get("snapshotDate", ""),
+                        "previousWeekSnapshotDate": (previous_week or {}).get("snapshotDate", ""),
+                    }
 
     return payload

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from .common import (
@@ -127,6 +127,45 @@ def analyze_topd(
             reverse=True,
         )[:5]
     ]
+    chart_start = today - timedelta(days=29)
+    chart_posts = filter_posts(
+        posts,
+        start_date=chart_start,
+        end_date=today,
+        hashtag_whitelist=tags,
+    )
+    chart_daily: list[dict[str, object]] = []
+    peak_day_channels: dict[tuple[str, str, str], dict[str, object]] = {}
+    peak_day_total = -1
+    peak_day_iso = ""
+    for offset in range(30):
+        day = chart_start + timedelta(days=offset)
+        day_posts = [post for post in chart_posts if post.published_date == day]
+        day_total = sum(post.view for post in day_posts)
+        chart_daily.append({"date": day.isoformat(), "totalViews": day_total})
+        if day_total > peak_day_total:
+            peak_day_total = day_total
+            peak_day_iso = day.isoformat()
+            peak_day_channels = {}
+            for post in day_posts:
+                key = (post.platform, post.channel_id, post.channel_name)
+                entry = peak_day_channels.setdefault(
+                    key,
+                    {"platform": post.platform, "channelName": post.channel_name, "totalViews": 0},
+                )
+                entry["totalViews"] = int(entry["totalViews"]) + post.view
+    peak_day_top_channels = [
+        {
+            "platform": str(item["platform"]),
+            "channelName": str(item["channelName"]),
+            "totalViews": int(item["totalViews"]),
+        }
+        for item in sorted(
+            peak_day_channels.values(),
+            key=lambda item: (int(item["totalViews"]), str(item["channelName"])),
+            reverse=True,
+        )[:3]
+    ]
     return {
         "code": "TOPD",
         "title": "TOPD",
@@ -140,6 +179,12 @@ def analyze_topd(
             "totalViews": official_views,
             "totalClips": official_clips,
             "percentage": percentage(official_views, total_views),
+        },
+        "dailyChart": chart_daily,
+        "peakDay": {
+            "date": peak_day_iso,
+            "totalViews": max(peak_day_total, 0),
+            "topChannels": peak_day_top_channels,
         },
         "kpiTarget": target,
         "kpiPercent": percentage(total_views, target),

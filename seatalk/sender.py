@@ -30,9 +30,14 @@ def send_report_packages(
             client = build_seatalk_client(app_id=app_id, app_secret=app_secret, group_id=group_id)
             client.send_text(build_text_payload(package["renderedText"]))
             chart_status = "not_applicable"
-            chart_path = str(package.get("chartPath") or "").strip()
-            if chart_path:
-                client.send_image_path(chart_path)
+            chart_paths = [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]
+            if not chart_paths:
+                fallback_chart_path = str(package.get("chartPath") or "").strip()
+                if fallback_chart_path:
+                    chart_paths = [fallback_chart_path]
+            if chart_paths:
+                for chart_path in chart_paths:
+                    client.send_image_path(chart_path)
                 chart_status = "sent"
             interactive_status = "not_applicable"
             interactive_actions = package.get("interactiveActions") or []

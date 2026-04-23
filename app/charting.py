@@ -3,19 +3,95 @@ from __future__ import annotations
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from analyze.common import KOL_CATEGORY_IDS, KOL_PLATFORMS, filter_posts, load_posts
 
 
-WEEKDAY_LABELS = {
-    0: "Thứ Hai",
-    1: "Thứ Ba",
-    2: "Thứ Tư",
-    3: "Thứ Năm",
-    4: "Thứ Sáu",
-    5: "Thứ Bảy",
-    6: "Chủ Nhật",
-}
+def _compact_view(value: float) -> str:
+    absolute = abs(value)
+    if absolute >= 1_000_000:
+        return f"{value / 1_000_000:.0f}M view"
+    if absolute >= 1_000:
+        return f"{value / 1_000:.0f}K view"
+    return f"{int(value)} view"
+
+
+def _build_daily_view_chart(
+    daily_points: list[dict[str, Any]],
+    *,
+    title: str,
+    include_weekday: bool,
+    peak_channels: list[dict[str, Any]] | None = None,
+    filename_prefix: str,
+) -> Path:
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter
+
+    dates = [datetime.fromisoformat(str(item["date"])).date() for item in daily_points]
+    values = [int(item.get("totalViews", 0) or 0) for item in daily_points]
+    if include_weekday:
+        labels = [f"{_weekday_label(day.weekday())}\n{day.strftime('%d/%m')}" for day in dates]
+    else:
+        labels = [day.strftime("%d/%m") for day in dates]
+
+    output_dir = Path(tempfile.mkdtemp(prefix="seatalk-chart-"))
+    output_path = output_dir / f"{filename_prefix}.png"
+
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.plot(labels, values, color="#0f6cbd", linewidth=2.6)
+    ax.fill_between(labels, values, color="#cfe8ff", alpha=0.45)
+    ax.set_title(title, fontsize=18, fontweight="bold")
+    ax.set_ylabel("View", fontsize=12)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _position: _compact_view(value)))
+    ax.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.35)
+    ax.tick_params(axis="x", rotation=45, labelsize=9)
+
+    for tick, day in zip(ax.get_xticklabels(), dates):
+        if day.weekday() in {5, 6}:
+            tick.set_color("#d97706")
+            tick.set_fontweight("bold")
+        tick.set_ha("right")
+
+    if values:
+        peak_index = max(range(len(values)), key=lambda index: values[index])
+        peak_value = values[peak_index]
+        peak_text = "\n".join(
+            f"{index + 1}. {item['channelName']}"
+            for index, item in enumerate((peak_channels or [])[:3])
+        )
+        if peak_text:
+            ax.annotate(
+                peak_text,
+                xy=(peak_index, peak_value),
+                xytext=(peak_index, peak_value + max(values) * 0.08 if max(values) else 1),
+                fontsize=8,
+                ha="center",
+                va="bottom",
+                color="#1f2937",
+                arrowprops={"arrowstyle": "-", "color": "#94a3b8", "linewidth": 0.8},
+            )
+
+    fig.text(0.965, 0.95, "FFVN", ha="right", va="top", fontsize=9, color="#475569", alpha=0.85)
+    fig.tight_layout()
+    fig.savefig(output_path, format="png", dpi=150)
+    plt.close(fig)
+    return output_path
+
+
+def _weekday_label(weekday: int) -> str:
+    return {
+        0: "Thứ Hai",
+        1: "Thứ Ba",
+        2: "Thứ Tư",
+        3: "Thứ Năm",
+        4: "Thứ Sáu",
+        5: "Thứ Bảy",
+        6: "Chủ Nhật",
+    }[weekday]
 
 
 def build_kol_30d_chart(
@@ -24,12 +100,6 @@ def build_kol_30d_chart(
     title: str = "Biểu Đồ View KOLs 30 ngày gần nhất",
     now: datetime | None = None,
 ) -> Path:
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
-
     posts = load_posts(db_path)
     anchor = (now or datetime.now()).date()
     start_date = anchor - timedelta(days=29)
@@ -42,38 +112,59 @@ def build_kol_30d_chart(
         require_kol=True,
     )
     totals: dict[str, int] = {}
-    for post in scoped:
-        key = post.published_date.isoformat()
-        totals[key] = totals.get(key, 0) + post.view
+    peak_day_channels: dict[tuple[str, str, str], dict[str, Any]] = {}
+    peak_day_total = -1
+    peak_day_iso = ""
+    for offset in range(30):
+        day = start_date + timedelta(days=offset)
+        day_posts = [post for post in scoped if post.published_date == day]
+        day_total = sum(post.view for post in day_posts)
+        day_iso = day.isoformat()
+        totals[day_iso] = day_total
+        if day_total > peak_day_total:
+            peak_day_total = day_total
+            peak_day_iso = day_iso
+            peak_day_channels = {}
+            for post in day_posts:
+                key = (post.platform, post.channel_id, post.channel_name)
+                entry = peak_day_channels.setdefault(
+                    key,
+                    {"platform": post.platform, "channelName": post.channel_name, "totalViews": 0},
+                )
+                entry["totalViews"] = int(entry["totalViews"]) + post.view
+    peak_channels = [
+        item
+        for item in sorted(
+            peak_day_channels.values(),
+            key=lambda item: (int(item["totalViews"]), str(item["channelName"])),
+            reverse=True,
+        )[:3]
+    ]
+    daily_points = [{"date": day_iso, "totalViews": totals[day_iso]} for day_iso in sorted(totals)]
+    return _build_daily_view_chart(
+        daily_points,
+        title=title,
+        include_weekday=True,
+        peak_channels=peak_channels if peak_day_iso else [],
+        filename_prefix="kol-30d-chart",
+    )
 
-    labels: list[str] = []
-    values: list[int] = []
-    current = start_date
-    while current <= anchor:
-        key = current.isoformat()
-        labels.append(f"{WEEKDAY_LABELS[current.weekday()]}\n{current.strftime('%d/%m')}")
-        values.append(totals.get(key, 0))
-        current += timedelta(days=1)
 
-    def _format_view_axis(value: float, _position: int) -> str:
-        if abs(value) >= 1_000_000:
-            return f"{value / 1_000_000:.0f}M view"
-        if abs(value) >= 1_000:
-            return f"{value / 1_000:.0f}K view"
-        return f"{int(value)} view"
+def build_campaign_30d_chart(campaign: dict[str, Any], *, title: str = "Biểu Đồ View Campaign 30 ngày gần nhất") -> Path:
+    return _build_daily_view_chart(
+        list(campaign.get("dailyChart") or []),
+        title=title,
+        include_weekday=False,
+        peak_channels=list((campaign.get("peakDay") or {}).get("topChannels") or []),
+        filename_prefix=f"campaign-{campaign.get('campaignName', 'report')}".replace(" ", "-").lower(),
+    )
 
-    output_dir = Path(tempfile.mkdtemp(prefix="seatalk-chart-"))
-    output_path = output_dir / "kol-30d-chart.png"
 
-    plt.figure(figsize=(14, 5))
-    plt.plot(labels, values, color="#0f6cbd", linewidth=2.6)
-    plt.fill_between(labels, values, color="#cfe8ff", alpha=0.45)
-    plt.title(title, fontsize=18, fontweight="bold")
-    plt.ylabel("View", fontsize=12)
-    plt.gca().yaxis.set_major_formatter(FuncFormatter(_format_view_axis))
-    plt.xticks(rotation=45, ha="right", fontsize=9)
-    plt.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.35)
-    plt.tight_layout()
-    plt.savefig(output_path, format="png", dpi=150)
-    plt.close()
-    return output_path
+def build_official_30d_chart(section: dict[str, Any], *, title: str = "Biểu Đồ View Official 30 ngày gần nhất") -> Path:
+    return _build_daily_view_chart(
+        list(section.get("dailyChart") or []),
+        title=title,
+        include_weekday=False,
+        peak_channels=list((section.get("peakDay") or {}).get("topChannels") or []),
+        filename_prefix="official-30d-chart",
+    )

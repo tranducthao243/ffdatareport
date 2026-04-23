@@ -57,22 +57,26 @@ def render_top_channels(title: str, section: dict[str, Any]) -> list[str]:
 
 
 def render_tope(section: dict[str, Any]) -> list[str]:
+    history_compare = section.get("historyCompare") or {}
+    history_labels = section.get("historyLabels") or {}
     lines = [
-        "**Tổng quan hiệu quả hệ KOL trong 7 ngày qua**",
+        "**Tổng quan data KOL 7 ngày qua**",
         f"*Khung thời gian: `{section['window']['from']} -> {section['window']['to']}`*",
         f"- Tổng view: {compact_number(section['totalViews'])}",
         f"- Tổng clip: {section['totalClips']}",
     ]
-    history_compare = section.get("historyCompare") or {}
     daily = list(section.get("daily") or [])
     if len(daily) >= 2:
         today_views = int(daily[-1].get("totalView", 0) or 0)
         yesterday_views = int(daily[-2].get("totalView", 0) or 0)
-        lines.append(f"- View hôm nay so với hôm trước: {format_delta(today_views - yesterday_views)}")
+        lines.append(
+            f"- View ngày {daily[-1].get('date', '-')} so với ngày {daily[-2].get('date', '-')}: {format_delta(today_views - yesterday_views)}"
+        )
     if history_compare.get("vsPreviousWeek"):
         lines.append(
-            "- View tuần này so với tuần trước: "
-            f"{format_delta(int(history_compare['vsPreviousWeek']['views']['change']))}"
+            "- Tổng view 7 ngày hiện tại so với snapshot tuần trước"
+            f" ({history_labels.get('previousWeekSnapshotDate') or '-'})"
+            f": {format_delta(int(history_compare['vsPreviousWeek']['views']['change']))}"
         )
     lines.extend(render_history_compare(history_compare, include_clips=False))
     return lines
@@ -127,6 +131,8 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                     f"`{campaign.get('topKolsWithoutCampaignWindow', {}).get('from', '-')}"
                     f" -> {campaign.get('topKolsWithoutCampaignWindow', {}).get('to', '-')}`"
                 ),
+                "",
+                "**5. KOLs chưa tham gia campaign**",
             ]
         )
         top_kols_without_campaign = campaign.get("topKolsWithoutCampaign", [])
