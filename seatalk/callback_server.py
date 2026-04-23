@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 from datetime import datetime
@@ -24,6 +25,7 @@ from app.health import (
     build_health_snapshot,
     classify_private_command,
     format_data_report,
+    format_health_alert,
     format_health_report,
     format_scope_report,
     normalize_command_text,
@@ -35,6 +37,7 @@ from datasocial.seatalk import SeaTalkError
 
 from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
+from .alerts import send_superadmin_alerts
 from .callbacks import (
     SeatalkCallbackError,
     build_callback_context,
@@ -140,6 +143,31 @@ def _build_private_usage_text() -> str:
     )
 
 
+def _is_allowed_ctv_group(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
+    group_id = str(callback_context.get("group_id") or "").strip()
+    return bool(group_id and group_id in set(runtime.get("ctv_group_ids") or []))
+
+
+def _message_addresses_bot(runtime: dict[str, Any], message_text: str) -> bool:
+    normalized = normalize_command_text(message_text)
+    if not normalized:
+        return False
+    for alias in runtime.get("group_bot_aliases") or []:
+        if alias and alias in normalized:
+            return True
+    return False
+
+
+def _strip_group_bot_aliases(runtime: dict[str, Any], message_text: str) -> str:
+    cleaned = str(message_text or "")
+    for alias in runtime.get("group_bot_aliases") or []:
+        if not alias:
+            continue
+        cleaned = re.sub(re.escape(alias), " ", normalize_command_text(cleaned), flags=re.IGNORECASE)
+        break
+    return " ".join(cleaned.split()).strip()
+
+
 def _build_private_help_text(role: str) -> str:
     lines = [
         "**LỆNH BOT PRIVATE**",
@@ -196,6 +224,20 @@ def _build_private_usage_text() -> str:
 
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _split_csv_env(*values: str) -> list[str]:
+    items: list[str] = []
+    for raw in values:
+        for token in str(raw or "").replace(";", ",").split(","):
+            value = token.strip()
+            if value and value not in items:
+                items.append(value)
+    return items
+
+
+def _normalize_alias(alias: str) -> str:
+    return normalize_command_text(alias).replace("@", "").strip()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -266,6 +308,12 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "env_role_directory": env_role_directory,
         "superadmin_users": superadmin_users,
         "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
+        "ctv_group_ids": _split_csv_env(os.getenv("SEATALK_CTV_GROUP_IDS", "")),
+        "group_bot_aliases": [
+            _normalize_alias(alias)
+            for alias in _split_csv_env(os.getenv("SEATALK_GROUP_BOT_ALIASES", "Bot Data KOLs,@Bot Data KOLs"))
+            if _normalize_alias(alias)
+        ],
     }
 
 
@@ -375,7 +423,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "message_received_from_bot_user",
                     "message_from_user",
                 }:
-                    self._handle_private_message(event)
+                    callback_context = build_callback_context(event)
+                    if callback_context.get("group_id"):
+                        self._handle_group_message(event)
+                    else:
+                        self._handle_private_message(event)
                     self._write_json(HTTPStatus.OK, {"code": 0})
                     return
 
@@ -386,6 +438,75 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def log_message(self, format: str, *args: object) -> None:
             LOGGER.info("%s - %s", self.address_string(), format % args)
+
+        def _notify_superadmins_once(self, key: str, title: str, body: str) -> None:
+            if not key or not runtime.get("superadmin_users"):
+                return
+            with private_message_lock:
+                sent_alert_keys: set[str] = getattr(self.server, "_sent_alert_keys", set())
+                if key in sent_alert_keys:
+                    return
+                sent_alert_keys.add(key)
+                setattr(self.server, "_sent_alert_keys", sent_alert_keys)
+            try:
+                results = send_superadmin_alerts(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    superadmins=runtime["superadmin_users"],
+                    title=title,
+                    body=body,
+                )
+                LOGGER.info("Seatalk superadmin alert sent | key=%s | results=%s", key, json.dumps(results, ensure_ascii=False))
+            except Exception:
+                LOGGER.exception("Seatalk superadmin alert failed | key=%s", key)
+
+        def _sync_store_if_needed(self, source: str) -> None:
+            if not runtime["sync_on_click"]:
+                return
+            try:
+                sync_store_from_github_artifact(runtime)
+            except Exception as exc:
+                self._notify_superadmins_once(
+                    f"sync:{source}:{type(exc).__name__}:{exc}",
+                    "Lỗi đồng bộ dữ liệu",
+                    f"Nguồn: {source}\nLỗi: {type(exc).__name__}: {exc}",
+                )
+                raise
+
+        def _maybe_alert_health_issues(self, health_snapshot: dict[str, Any], source: str) -> None:
+            issues = health_snapshot.get("issues") or []
+            if not issues:
+                return
+            issue_codes = ",".join(sorted(str(item.get("code") or "-") for item in issues))
+            generated_at = str(health_snapshot.get("generatedAt") or "")
+            self._notify_superadmins_once(
+                f"health:{source}:{issue_codes}:{generated_at}",
+                "Cảnh báo thiếu dữ liệu / lỗi dữ liệu",
+                format_health_alert(health_snapshot),
+            )
+
+        def _build_group_client(self, callback_context: dict[str, str]):
+            return build_seatalk_client(
+                app_id=runtime["seatalk_app_id"],
+                app_secret=runtime["seatalk_app_secret"],
+                group_id=callback_context.get("group_id", ""),
+                thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+                quoted_message_id=callback_context.get("message_id", ""),
+            )
+
+        def _build_health_snapshot(self) -> dict[str, Any]:
+            campaigns_config = load_json(runtime["campaigns_config"])
+            reports_payload = self._build_reports_payload()
+            return build_health_snapshot(
+                reports_payload,
+                db_path=runtime["db_path"],
+                source_scope={
+                    "category_ids": runtime["preset_category_ids"],
+                    "platform_ids": runtime["preset_platform_ids"],
+                },
+                campaigns_config=campaigns_config,
+                now=datetime.now(),
+            )
 
         def _handle_interactive_click(self, event: dict[str, Any]) -> None:
             callback_context = build_callback_context(event)
@@ -454,8 +575,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     group_id or "-",
                     thread_id or "-",
                 )
-            if runtime["sync_on_click"]:
-                sync_store_from_github_artifact(runtime)
+            self._sync_store_if_needed("interactive_click")
 
             if action == "reply_text":
                 message_text = str(click_payload.get("message") or "").strip()
@@ -474,6 +594,128 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 "Seatalk callback reply sent as private message | employee_code=%s | from_group=%s",
                 employee_code,
                 group_id or "-",
+            )
+
+        def _handle_group_message(self, event: dict[str, Any]) -> None:
+            callback_context = build_callback_context(event)
+            LOGGER.info(
+                "Seatalk group message context | %s",
+                json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
+            )
+            if not _is_allowed_ctv_group(runtime, callback_context):
+                LOGGER.info(
+                    "Ignoring group message outside CTV allowlist | group_id=%s | employee_code=%s",
+                    callback_context.get("group_id") or "-",
+                    callback_context.get("employee_code") or "-",
+                )
+                return
+
+            in_thread = bool(callback_context.get("thread_id"))
+            message_text = callback_context.get("message_text", "")
+            if not in_thread and not _message_addresses_bot(runtime, message_text):
+                LOGGER.info(
+                    "Ignoring top-level CTV group message without bot mention | group_id=%s | message_id=%s",
+                    callback_context.get("group_id") or "-",
+                    callback_context.get("message_id") or "-",
+                )
+                return
+
+            if callback_context.get("message_tag") == "image":
+                self._handle_group_image_message(callback_context)
+                return
+
+            stripped_message = message_text if in_thread else (_strip_group_bot_aliases(runtime, message_text) or message_text)
+            callback_context = {**callback_context, "message_text": stripped_message}
+            command = classify_private_command(stripped_message)
+            is_menu_shortcut = normalize_command_text(stripped_message) == "."
+
+            group_client = self._build_group_client(callback_context)
+            try:
+                group_client.set_typing_status()
+            except Exception:
+                LOGGER.exception(
+                    "Seatalk group typing status failed | group_id=%s | thread_id=%s",
+                    callback_context.get("group_id") or "-",
+                    callback_context.get("thread_id") or callback_context.get("message_id") or "-",
+                )
+
+            self._sync_store_if_needed("group_message")
+            health_snapshot = self._build_health_snapshot()
+            self._maybe_alert_health_issues(health_snapshot, "group_message")
+
+            if command == "campaign":
+                self._send_thread_report_with_optional_chart(group_client, "TOPD_REPORT")
+                return
+            if command == "official":
+                self._send_thread_report_with_optional_chart(group_client, "TOPF_REPORT")
+                return
+            if command == "dance":
+                reply_text = self._build_report_text("TOPG_REPORT")
+            elif command == "roblox":
+                reply_text = self._build_report_text("TOPH_REPORT")
+            elif command == "web":
+                links_payload = load_json(Path("config/webcompany_links.json"))
+                lines = ["**Link web quan trọng của team**"]
+                sections = links_payload.get("sections") or []
+                if not sections and links_payload.get("links"):
+                    sections = [{"title": "Link tổng hợp", "links": links_payload.get("links") or []}]
+                if not sections:
+                    lines.append("- Chưa cấu hình link nào.")
+                else:
+                    for section in sections:
+                        lines.append(f"\n**{section.get('title', 'Danh sách link')}**")
+                        for item in section.get("links") or []:
+                            lines.append(f"- {item.get('label', 'Link')}: {item.get('url', '-')}")
+                            if item.get("note"):
+                                lines.append(f"  *{item['note']}*")
+                reply_text = "\n".join(lines)
+            elif command == "hashtag":
+                reply_text = format_hashtag_report_v2(runtime["db_path"], stripped_message, now=datetime.now())
+            elif command == "kol":
+                reply_text = format_kol_report(
+                    runtime["db_path"],
+                    stripped_message,
+                    mapping_path=runtime["kol_mapping_path"],
+                    now=datetime.now(),
+                )
+            elif command == "imagelink":
+                reply_text = self._handle_uploadimage_command(callback_context)
+            elif command == "removebg":
+                reply_text = self._handle_removebg_command(callback_context)
+            elif command in {"shortlink", "enhanceimage"}:
+                reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
+            elif is_menu_shortcut:
+                reply_text = _build_private_help_text("admin")
+            elif command == "help":
+                reply_text = _build_private_usage_text()
+            else:
+                reply_text = answer_data_question(
+                    runtime["db_path"],
+                    stripped_message,
+                    now=datetime.now(),
+                ) or (
+                    "**Tôi chưa hiểu câu hỏi này**\n"
+                    "*Trong group CTV, hãy tag bot để mở thread rồi tiếp tục gõ lệnh như `campaign`, `official`, `kol <tên KOL>`, `hashtag <tên hashtag>`.*"
+                )
+
+            if reply_text:
+                group_client.send_text(reply_text)
+
+        def _handle_group_image_message(self, callback_context: dict[str, str]) -> None:
+            employee_code = callback_context["employee_code"]
+            image_url = callback_context.get("image_url", "")
+            if not employee_code or not image_url:
+                return
+            store_latest_image_for_user(
+                get_image_store_path(),
+                employee_code=employee_code,
+                seatalk_id=callback_context.get("seatalk_id", ""),
+                message_id=callback_context.get("message_id", ""),
+                image_url=image_url,
+                thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+            )
+            self._build_group_client(callback_context).send_text(
+                "Đã nhận ảnh gần nhất của bạn trong luồng này.\nGõ `imagelink` để tải ảnh lên web nội bộ.\nGõ `removebg` để tách nền ảnh."
             )
 
         def _handle_private_message(self, event: dict[str, Any]) -> None:
@@ -559,18 +801,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     thread_id or "-",
                 )
 
-            campaigns_config = load_json(runtime["campaigns_config"])
-            reports_payload = self._build_reports_payload()
-            health_snapshot = build_health_snapshot(
-                reports_payload,
-                db_path=runtime["db_path"],
-                source_scope={
-                    "category_ids": runtime["preset_category_ids"],
-                    "platform_ids": runtime["preset_platform_ids"],
-                },
-                campaigns_config=campaigns_config,
-                now=datetime.now(),
-            )
+            self._sync_store_if_needed("private_message")
+            health_snapshot = self._build_health_snapshot()
+            self._maybe_alert_health_issues(health_snapshot, "private_message")
 
             if command == "campaign":
                 self._send_private_report_with_optional_chart(private_client, "TOPD_REPORT")
@@ -746,6 +979,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
         def _handle_removebg_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
             active_job = (employee_code, "removebg")
+            is_group_flow = bool(callback_context.get("group_id"))
             LOGGER.info("Seatalk removebg command received | employee_code=%s", employee_code)
             with private_message_lock:
                 if active_job in active_uploads:
@@ -779,14 +1013,18 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 output_path = remove_background_with_space(image_path)
                 fallback_reply = ""
 
-                private_client = build_seatalk_client(
-                    app_id=runtime["seatalk_app_id"],
-                    app_secret=runtime["seatalk_app_secret"],
-                    employee_code=employee_code,
-                    thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+                delivery_client = (
+                    self._build_group_client(callback_context)
+                    if is_group_flow
+                    else build_seatalk_client(
+                        app_id=runtime["seatalk_app_id"],
+                        app_secret=runtime["seatalk_app_secret"],
+                        employee_code=employee_code,
+                        thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+                    )
                 )
                 try:
-                    send_seatalk_image_reply(private_client, output_path)
+                    send_seatalk_image_reply(delivery_client, output_path)
                 except SeaTalkError as exc:
                     if not SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED:
                         raise UploadImageError(f"SeaTalk private image reply failed: {exc}") from exc
@@ -806,7 +1044,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         final_url,
                     )
                     try:
-                        private_client.send_image_url(final_url)
+                        delivery_client.send_image_url(final_url)
                         LOGGER.info(
                             "Removebg vendor image URL reply succeeded | employee_code=%s | final_url=%s",
                             employee_code,
@@ -815,7 +1053,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         fallback_reply = (
                             "**Tach nen anh thanh cong**\n"
                             f"*Toi da gui lai anh PNG bang URL anh.*\n"
-                            f"- Link anh: {final_url}"
+                            f"- Link ảnh: {final_url}"
                         )
                     except SeaTalkError as nested_exc:
                         LOGGER.warning(
@@ -826,7 +1064,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         fallback_reply = (
                             "**Tach nen anh thanh cong**\n"
                             "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"
-                            f"- Link anh: {final_url}"
+                            f"- Link ảnh: {final_url}"
                         )
             except UploadImageError as exc:
                 LOGGER.exception("Remove background flow failure | employee_code=%s", employee_code)
@@ -856,40 +1094,59 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             return fallback_reply
 
         def _build_report_text(self, report_code: str) -> str:
-            package = build_report_package_by_code(
-                runtime["db_path"],
-                report_code=report_code,
-                groups_path=runtime["groups_config"],
-                reports_path=runtime["reports_config"],
-                campaigns_path=runtime["campaigns_config"],
-                timezone_name=runtime["report_timezone"],
-                mode=runtime["report_mode"],
-                source_scope={
-                    "category_ids": runtime["preset_category_ids"],
-                    "platform_ids": runtime["preset_platform_ids"],
-                },
-                now=datetime.now(),
-            )
+            try:
+                package = build_report_package_by_code(
+                    runtime["db_path"],
+                    report_code=report_code,
+                    groups_path=runtime["groups_config"],
+                    reports_path=runtime["reports_config"],
+                    campaigns_path=runtime["campaigns_config"],
+                    timezone_name=runtime["report_timezone"],
+                    mode=runtime["report_mode"],
+                    source_scope={
+                        "category_ids": runtime["preset_category_ids"],
+                        "platform_ids": runtime["preset_platform_ids"],
+                    },
+                    now=datetime.now(),
+                )
+            except Exception as exc:
+                self._notify_superadmins_once(
+                    f"report:{report_code}:{type(exc).__name__}:{exc}",
+                    "Lỗi dựng báo cáo private/group",
+                    f"Report: {report_code}\nError: {type(exc).__name__}: {exc}",
+                )
+                raise
             return str(package.get("renderedText") or "").strip()
 
-        def _send_private_report_with_optional_chart(self, private_client: Any, report_code: str) -> None:
-            package = build_report_package_by_code(
-                runtime["db_path"],
-                report_code=report_code,
-                groups_path=runtime["groups_config"],
-                reports_path=runtime["reports_config"],
-                campaigns_path=runtime["campaigns_config"],
-                timezone_name=runtime["report_timezone"],
-                mode=runtime["report_mode"],
-                source_scope={
-                    "category_ids": runtime["preset_category_ids"],
-                    "platform_ids": runtime["preset_platform_ids"],
-                },
-                now=datetime.now(),
-            )
-            private_client.send_text(str(package.get("renderedText") or "").strip())
+        def _send_thread_report_with_optional_chart(self, client: Any, report_code: str) -> None:
+            try:
+                package = build_report_package_by_code(
+                    runtime["db_path"],
+                    report_code=report_code,
+                    groups_path=runtime["groups_config"],
+                    reports_path=runtime["reports_config"],
+                    campaigns_path=runtime["campaigns_config"],
+                    timezone_name=runtime["report_timezone"],
+                    mode=runtime["report_mode"],
+                    source_scope={
+                        "category_ids": runtime["preset_category_ids"],
+                        "platform_ids": runtime["preset_platform_ids"],
+                    },
+                    now=datetime.now(),
+                )
+            except Exception as exc:
+                self._notify_superadmins_once(
+                    f"report:{report_code}:{type(exc).__name__}:{exc}",
+                    "Lỗi dựng báo cáo private/group",
+                    f"Report: {report_code}\nError: {type(exc).__name__}: {exc}",
+                )
+                raise
+            client.send_text(str(package.get("renderedText") or "").strip())
             for chart_path in [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]:
-                private_client.send_image_path(chart_path)
+                client.send_image_path(chart_path)
+
+        def _send_private_report_with_optional_chart(self, private_client: Any, report_code: str) -> None:
+            self._send_thread_report_with_optional_chart(private_client, report_code)
 
         def _build_reports_payload(self) -> dict[str, Any]:
             from app.pipeline import build_configured_reports
@@ -941,7 +1198,18 @@ def run_server(args: argparse.Namespace) -> None:
             "Server will start, but callback replies will fail until these vars are set."
         )
     if runtime["sync_on_start"]:
-        sync_store_from_github_artifact(runtime)
+        try:
+            sync_store_from_github_artifact(runtime)
+        except Exception as exc:
+            if runtime.get("seatalk_app_id") and runtime.get("seatalk_app_secret") and runtime.get("superadmin_users"):
+                send_superadmin_alerts(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    superadmins=runtime["superadmin_users"],
+                    title="Lỗi đồng bộ dữ liệu khi khởi động bot",
+                    body=f"Phase: sync_on_start\nError: {type(exc).__name__}: {exc}",
+                )
+            raise
     handler = make_handler(runtime)
     with ThreadingHTTPServer((args.host, args.port), handler) as server:
         LOGGER.info("Seatalk callback server listening on http://%s:%s", args.host, args.port)
