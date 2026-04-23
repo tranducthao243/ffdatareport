@@ -140,6 +140,60 @@ def _build_private_usage_text() -> str:
     )
 
 
+def _build_private_help_text(role: str) -> str:
+    lines = [
+        "**LỆNH BOT PRIVATE**",
+        "*Gõ `.` để mở nhanh menu này.*",
+        "",
+    ]
+    if role == "superadmin":
+        lines.extend(
+            [
+                "**Kiểm tra dữ liệu**",
+                "- `health`: tổng quan tình trạng dữ liệu",
+                "- `data`: kho dữ liệu đang dùng",
+                "- `scope`: source scope hiện tại",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "**Tiện ích**",
+            "- `web`: liệt kê các link web quan trọng của team",
+            "- `hashtag`: gõ hashtag và tên hashtag để check data",
+            "- `kol`: gõ `kol <tên KOL>` để check data theo KOL",
+            "",
+            "**Dữ liệu KOLs**",
+            "- `campaign`: báo cáo campaign hiện tại",
+            "- `official`: báo cáo kênh Official",
+            "- `dance`: báo cáo video trend nhảy",
+            "- `roblox`: báo cáo TOP video Roblox",
+            "",
+            "**Tính năng khác**",
+            "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",
+            "- `removebg`: tách nền ảnh và trả lại ảnh",
+            "- `shortlink`: tạo shortlink từ link và config",
+            "- `enhanceimage`: làm nét ảnh rồi trả kết quả",
+            "",
+            "**Hướng dẫn**",
+            "- `help`: xem cách dùng bot",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _build_private_usage_text() -> str:
+    return (
+        "**HƯỚNG DẪN SỬ DỤNG BOT**\n"
+        "\n"
+        "- Gõ dấu chấm `.` để gọi bảng tính năng.\n"
+        "- Chỉ cần gõ lệnh là có thể gọi được dữ liệu hoặc nhờ bot giải quyết các vấn đề cần thiết.\n"
+        "- Dự kiến BOT sẽ cập nhật thêm nhiều tính năng hơn nữa.\n"
+        "- Dữ liệu từ hệ thống của Free Fire.\n"
+        "- Nếu bạn có góp ý gì vui lòng liên hệ superadmin `ducthao.tran@garena.vn`."
+    )
+
+
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -413,24 +467,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                             "*Tôi sẽ mở nội dung này ngay khi dữ liệu sẵn sàng.*"
                         ),
                     )
+                private_client.send_text(message_text)
             else:
-                package = build_report_package_by_code(
-                    runtime["db_path"],
-                    report_code=target_report_code,
-                    groups_path=runtime["groups_config"],
-                    reports_path=runtime["reports_config"],
-                    campaigns_path=runtime["campaigns_config"],
-                    timezone_name=runtime["report_timezone"],
-                    mode=runtime["report_mode"],
-                    source_scope={
-                        "category_ids": runtime["preset_category_ids"],
-                        "platform_ids": runtime["preset_platform_ids"],
-                    },
-                    now=datetime.now(),
-                )
-                message_text = str(package.get("renderedText") or "").strip()
-
-            private_client.send_text(message_text)
+                self._send_private_report_with_optional_chart(private_client, target_report_code)
             LOGGER.info(
                 "Seatalk callback reply sent as private message | employee_code=%s | from_group=%s",
                 employee_code,
