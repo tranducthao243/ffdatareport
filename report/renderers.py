@@ -132,7 +132,7 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                     f" -> {campaign.get('topKolsWithoutCampaignWindow', {}).get('to', '-')}`"
                 ),
                 "",
-                "**5. KOLs chưa tham gia campaign**",
+                "**5. TOP KOLs chưa tham gia campaign**",
             ]
         )
         top_kols_without_campaign = campaign.get("topKolsWithoutCampaign", [])

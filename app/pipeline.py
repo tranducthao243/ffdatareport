@@ -313,4 +313,21 @@ def build_report_package_by_code(
     package["renderedText"] = render_seatalk_package(package)
     package["sectionCodes"] = [section["code"] for section in package["sections"]]
     package["sectionCount"] = len(package["sections"])
+    chart_paths: list[str] = []
+    if "TOPE" in package["sectionCodes"]:
+        chart_paths.append(str(build_kol_30d_chart(db_path, title="Biểu Đồ View KOLs 30 ngày gần nhất", now=now)))
+    if "TOPD" in package["sectionCodes"]:
+        topd_section = next((section for section in package["sections"] if section.get("code") == "TOPD"), None)
+        for campaign in (topd_section or {}).get("campaigns", []):
+            if campaign.get("dailyChart"):
+                chart_paths.append(
+                    str(build_campaign_30d_chart(campaign, title=f"Biểu Đồ View Campaign 30 ngày gần nhất - {campaign.get('campaignName', '-')}"))
+                )
+    if "TOPF" in package["sectionCodes"]:
+        topf_section = next((section for section in package["sections"] if section.get("code") == "TOPF"), None)
+        if topf_section and topf_section.get("dailyChart"):
+            chart_paths.append(str(build_official_30d_chart(topf_section, title="Biểu Đồ View Official 30 ngày gần nhất")))
+    if chart_paths:
+        package["chartPath"] = chart_paths[0]
+        package["chartPaths"] = chart_paths
     return package

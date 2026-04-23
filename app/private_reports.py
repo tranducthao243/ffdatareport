@@ -207,7 +207,6 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
     scoped = _filter_posts_by_kol(posts, channels, start_date=start_date, end_date=end_date)
     grouped_channels = _group_channels_by_platform(channels)
     top_hashtags = _format_top_hashtags(scoped, limit=3)
-    top_posts = _format_top_posts(scoped, limit=3)
     total_views = sum(post.view for post in scoped)
 
     lines = [
@@ -216,9 +215,6 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
         "Tổng quan (30 ngày):",
         f"- Tổng view: {compact_number(total_views)}",
         f"- Tổng số clip: {len(scoped)}",
-        "",
-        "TOP 3 video:",
-        *top_posts,
         "",
         "TOP 3 video TikTok:",
         *_format_top_posts_by_platform(scoped, platform="tiktok", limit=3),

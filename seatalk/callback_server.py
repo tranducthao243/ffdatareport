@@ -26,6 +26,7 @@ from app.health import (
     format_data_report,
     format_health_report,
     format_scope_report,
+    normalize_command_text,
 )
 from app.private_reports import format_hashtag_report_v2, format_kol_report
 from datasocial.exceptions import DatasocialError
@@ -128,6 +129,15 @@ def _build_private_help_text(role: str) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _build_private_usage_text() -> str:
+    return (
+        "**HƯỚNG DẪN SỬ DỤNG BOT**\n"
+        "Bạn gõ dấu chấm `.` để gọi bảng tính năng, chỉ cần gõ lệnh là có thể gọi được dữ liệu hoặc nhờ bot giải quyết các vấn đề cần thiết. "
+        "Dự kiến BOT sẽ cập nhật thêm nhiều tính năng hơn nữa. Dữ liệu từ hệ thống của Free Fire. "
+        "Nếu bạn có góp ý gì vui lòng liên hệ superadmin ducthao.tran@garena.vn"
+    )
 
 
 def _env_flag(name: str) -> bool:
@@ -474,7 +484,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 return
 
             message_text = callback_context["message_text"]
+            normalized_message_text = normalize_command_text(message_text)
             command = classify_private_command(message_text)
+            is_menu_shortcut = normalized_message_text == "."
             message_id = callback_context.get("message_id", "")
             if command in {"imagelink", "removebg"} and message_id:
                 with private_message_lock:
@@ -522,9 +534,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
 
             if command == "campaign":
-                reply_text = self._build_report_text("TOPD_REPORT")
+                self._send_private_report_with_optional_chart(private_client, "TOPD_REPORT")
+                return
             elif command == "official":
-                reply_text = self._build_report_text("TOPF_REPORT")
+                self._send_private_report_with_optional_chart(private_client, "TOPF_REPORT")
+                return
             elif command == "dance":
                 reply_text = self._build_report_text("TOPG_REPORT")
             elif command == "roblox":
@@ -566,8 +580,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = self._handle_removebg_command(callback_context)
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
-            elif command == "help":
+            elif is_menu_shortcut:
                 reply_text = _build_private_help_text(unified_user.get("role", "admin"))
+            elif command == "help":
+                reply_text = _build_private_usage_text()
             else:
                 reply_text = answer_data_question(
                     runtime["db_path"],
@@ -816,6 +832,25 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 now=datetime.now(),
             )
             return str(package.get("renderedText") or "").strip()
+
+        def _send_private_report_with_optional_chart(self, private_client: Any, report_code: str) -> None:
+            package = build_report_package_by_code(
+                runtime["db_path"],
+                report_code=report_code,
+                groups_path=runtime["groups_config"],
+                reports_path=runtime["reports_config"],
+                campaigns_path=runtime["campaigns_config"],
+                timezone_name=runtime["report_timezone"],
+                mode=runtime["report_mode"],
+                source_scope={
+                    "category_ids": runtime["preset_category_ids"],
+                    "platform_ids": runtime["preset_platform_ids"],
+                },
+                now=datetime.now(),
+            )
+            private_client.send_text(str(package.get("renderedText") or "").strip())
+            for chart_path in [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]:
+                private_client.send_image_path(chart_path)
 
         def _build_reports_payload(self) -> dict[str, Any]:
             from app.pipeline import build_configured_reports
