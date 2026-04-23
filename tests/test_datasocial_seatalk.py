@@ -19,6 +19,8 @@ from seatalk.callbacks import (
     parse_click_payload,
 )
 from seatalk.callback_server import build_runtime
+from seatalk.group_thread_service import is_allowed_ctv_group, split_csv_env
+from seatalk.private_bot_service import build_private_help_text, build_private_usage_text
 from seatalk.interactive import build_interactive_actions, build_interactive_groups
 from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
 from seatalk.sender import send_report_packages
@@ -39,6 +41,19 @@ from pathlib import Path
 
 
 class DatasocialSeatalkFormatterTests(unittest.TestCase):
+    def test_private_help_and_usage_text_services(self):
+        help_text = build_private_help_text("admin")
+        usage_text = build_private_usage_text()
+        self.assertIn("`kol`", help_text)
+        self.assertNotIn("ducthao.tran@garena.vn", help_text)
+        self.assertIn("ducthao.tran@garena.vn", usage_text)
+
+    def test_ctv_group_allowlist_service(self):
+        runtime = {"ctv_group_ids": ["group-1", "group-2"]}
+        self.assertEqual(split_csv_env("group-1, group-2"), ["group-1", "group-2"])
+        self.assertTrue(is_allowed_ctv_group(runtime, {"group_id": "group-1"}))
+        self.assertFalse(is_allowed_ctv_group(runtime, {"group_id": "group-x"}))
+
     def test_hashtag_command_is_detected_with_and_without_space(self):
         self.assertEqual(classify_private_command("hashtag ob53"), "hashtag")
         self.assertEqual(classify_private_command("hashtagob53"), "hashtag")

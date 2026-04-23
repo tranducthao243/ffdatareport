@@ -6,7 +6,6 @@ import hmac
 import json
 import logging
 import os
-import re
 import tempfile
 import threading
 from datetime import datetime
@@ -38,6 +37,13 @@ from datasocial.seatalk import SeaTalkError
 from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .alerts import send_superadmin_alerts
+from .group_thread_service import is_allowed_ctv_group as service_is_allowed_ctv_group, split_csv_env
+from .private_bot_service import (
+    build_private_help_text as service_build_private_help_text,
+    build_private_usage_text as service_build_private_usage_text,
+    format_private_access_denied as service_format_private_access_denied,
+    is_authorized_private_sender as service_is_authorized_private_sender,
+)
 from .callbacks import (
     SeatalkCallbackError,
     build_callback_context,
@@ -308,12 +314,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "env_role_directory": env_role_directory,
         "superadmin_users": superadmin_users,
         "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
-        "ctv_group_ids": _split_csv_env(os.getenv("SEATALK_CTV_GROUP_IDS", "")),
-        "group_bot_aliases": [
-            _normalize_alias(alias)
-            for alias in _split_csv_env(os.getenv("SEATALK_GROUP_BOT_ALIASES", "Bot Data KOLs,@Bot Data KOLs"))
-            if _normalize_alias(alias)
-        ],
+        "ctv_group_ids": split_csv_env(os.getenv("SEATALK_CTV_GROUP_IDS", "")),
     }
 
 
@@ -536,9 +537,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 employee_code=employee_code,
                 thread_id=thread_id,
             )
-            if not _is_authorized_private_sender(runtime, callback_context):
+            if not service_is_authorized_private_sender(runtime, callback_context):
                 private_client.send_text(
-                    _format_private_access_denied(
+                    service_format_private_access_denied(
                         callback_context,
                         contact_email=runtime["admin_contact_email"],
                     )
@@ -602,7 +603,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 "Seatalk group message context | %s",
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
             )
-            if not _is_allowed_ctv_group(runtime, callback_context):
+            if not service_is_allowed_ctv_group(runtime, callback_context):
                 LOGGER.info(
                     "Ignoring group message outside CTV allowlist | group_id=%s | employee_code=%s",
                     callback_context.get("group_id") or "-",
@@ -610,24 +611,15 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            in_thread = bool(callback_context.get("thread_id"))
             message_text = callback_context.get("message_text", "")
-            if not in_thread and not _message_addresses_bot(runtime, message_text):
-                LOGGER.info(
-                    "Ignoring top-level CTV group message without bot mention | group_id=%s | message_id=%s",
-                    callback_context.get("group_id") or "-",
-                    callback_context.get("message_id") or "-",
-                )
-                return
 
             if callback_context.get("message_tag") == "image":
                 self._handle_group_image_message(callback_context)
                 return
 
-            stripped_message = message_text if in_thread else (_strip_group_bot_aliases(runtime, message_text) or message_text)
-            callback_context = {**callback_context, "message_text": stripped_message}
-            command = classify_private_command(stripped_message)
-            is_menu_shortcut = normalize_command_text(stripped_message) == "."
+            callback_context = {**callback_context, "message_text": message_text}
+            command = classify_private_command(message_text)
+            is_menu_shortcut = normalize_command_text(message_text) == "."
 
             group_client = self._build_group_client(callback_context)
             try:
@@ -670,11 +662,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
-                reply_text = format_hashtag_report_v2(runtime["db_path"], stripped_message, now=datetime.now())
+                reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
             elif command == "kol":
                 reply_text = format_kol_report(
                     runtime["db_path"],
-                    stripped_message,
+                    message_text,
                     mapping_path=runtime["kol_mapping_path"],
                     now=datetime.now(),
                 )
@@ -685,13 +677,13 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif is_menu_shortcut:
-                reply_text = _build_private_help_text("admin")
+                reply_text = service_build_private_help_text("admin")
             elif command == "help":
-                reply_text = _build_private_usage_text()
+                reply_text = service_build_private_usage_text()
             else:
                 reply_text = answer_data_question(
                     runtime["db_path"],
-                    stripped_message,
+                    message_text,
                     now=datetime.now(),
                 ) or (
                     "**Tôi chưa hiểu câu hỏi này**\n"
@@ -740,14 +732,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             employee_code = callback_context["employee_code"]
             if not employee_code:
                 raise SeatalkCallbackError("Missing employee_code in private message event.")
-            if not _is_authorized_private_sender(runtime, callback_context):
+            if not service_is_authorized_private_sender(runtime, callback_context):
                 client = build_seatalk_client(
                     app_id=runtime["seatalk_app_id"],
                     app_secret=runtime["seatalk_app_secret"],
                     employee_code=employee_code,
                 )
                 client.send_text(
-                    _format_private_access_denied(
+                    service_format_private_access_denied(
                         callback_context,
                         contact_email=runtime["admin_contact_email"],
                     )
@@ -853,9 +845,9 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif is_menu_shortcut:
-                reply_text = _build_private_help_text(unified_user.get("role", "admin"))
+                reply_text = service_build_private_help_text(unified_user.get("role", "admin"))
             elif command == "help":
-                reply_text = _build_private_usage_text()
+                reply_text = service_build_private_usage_text()
             else:
                 reply_text = answer_data_question(
                     runtime["db_path"],
