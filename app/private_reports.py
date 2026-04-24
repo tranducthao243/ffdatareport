@@ -6,9 +6,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from analyze.common import StorePost, load_posts
+from analyze.common import KOL_CATEGORY_IDS, StorePost, load_posts
 
 from .health import compact_number, extract_hashtag_query, normalize_command_text
+
+
+HASHTAG_PRIVATE_CATEGORY_IDS = {13, *KOL_CATEGORY_IDS}
 
 
 def _recent_window(days: int, *, now: datetime | None = None) -> tuple[date, date]:
@@ -287,9 +290,18 @@ def format_hashtag_report_v2(db_path: Path, text: str, *, now: datetime | None =
         return "Hashtag: -\nVui lòng dùng cú pháp: `hashtag ob53` hoặc `hashtagob53`."
 
     posts = load_posts(db_path)
-    matched = [post for post in posts if query in {tag.lstrip('#').lower() for tag in post.hashtags}]
+    matched = [
+        post
+        for post in posts
+        if post.category_id in HASHTAG_PRIVATE_CATEGORY_IDS
+        and query in {tag.lstrip('#').lower() for tag in post.hashtags}
+    ]
     if not matched:
-        return f"Hashtag: #{query}\nKhông tìm thấy dữ liệu."
+        return (
+            f"Hashtag: #{query}\n"
+            "Dữ liệu: Chỉ KOLs Free Fire và Official.\n"
+            "Không tìm thấy dữ liệu."
+        )
 
     total_views = sum(post.view for post in matched)
     min_date = min(post.published_date for post in matched).isoformat()
@@ -306,6 +318,7 @@ def format_hashtag_report_v2(db_path: Path, text: str, *, now: datetime | None =
 
     lines = [
         f"Hashtag: #{query}",
+        "Dữ liệu: Chỉ KOLs Free Fire và Official.",
         f"Date range: {min_date} -> {max_date}",
         f"Total views: {compact_number(total_views)}",
         f"Total content: {len(matched)}",
