@@ -65,6 +65,10 @@ def classify_private_command(text: str) -> str:
         return "data"
     if normalized in {"scope", "source", "nguon", "nguon du lieu"}:
         return "scope"
+    if normalized in {"fetch", "quet data", "quet du lieu"}:
+        return "fetch"
+    if normalized in {"send", "gui bao cao", "gui data"}:
+        return "send"
     if normalized in {"campaign", "topd", "chien dich"}:
         return "campaign"
     if normalized in {"official", "topf", "kenh official"}:

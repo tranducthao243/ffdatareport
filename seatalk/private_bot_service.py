@@ -40,6 +40,10 @@ def build_private_help_text(role: str) -> str:
                 "- `data`: kho dữ liệu đang dùng",
                 "- `scope`: source scope hiện tại",
                 "",
+                "**Điều Khiển Trung Tâm**",
+                "- `fetch`: quét dữ liệu mới từ workflow FFVN Daily Fetch",
+                "- `send`: gửi báo cáo từ workflow FFVN Daily Send",
+                "",
             ]
         )
     lines.extend(

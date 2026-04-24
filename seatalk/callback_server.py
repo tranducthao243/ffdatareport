@@ -8,6 +8,7 @@ import logging
 import os
 import tempfile
 import threading
+import time
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,7 @@ from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .alerts import send_superadmin_alerts
 from .group_thread_service import is_allowed_ctv_group as service_is_allowed_ctv_group, split_csv_env
+from .interactive import build_superadmin_control_payload
 from .private_bot_service import (
     build_private_help_text as service_build_private_help_text,
     build_private_usage_text as service_build_private_usage_text,
@@ -67,6 +69,10 @@ from .uploadimage import (
 
 LOGGER = logging.getLogger("seatalk.callback_server")
 SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED = os.getenv("SEATALK_REMOVEBG_VENDOR_FALLBACK_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+WORKFLOW_NAME_MAP = {
+    "ffvn-daily-fetch.yml": "FFVN Daily Fetch (Scheduled)",
+    "ffvn-daily-send.yml": "FFVN Daily Send (Scheduled)",
+}
 
 
 PRIVATE_FUTURE_FEATURE_MESSAGE = (
@@ -301,6 +307,7 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "report_mode": args.report_mode,
         "report_timezone": args.report_timezone,
         "repo": args.repo,
+        "github_ref": os.getenv("GITHUB_REF_NAME", "main").strip() or "main",
         "artifact_name": args.artifact_name,
         "artifact_token": args.artifact_token,
         "sync_on_start": bool(args.sync_on_start),
@@ -376,6 +383,131 @@ def sync_store_from_github_artifact(runtime: dict[str, Any]) -> bool:
             Path(extracted).replace(db_path)
     LOGGER.info("Synced SQLite store from GitHub artifact %s into %s", artifact_id, db_path)
     return True
+
+
+def _github_headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def trigger_github_workflow(runtime: dict[str, Any], *, workflow_file: str, inputs: dict[str, Any] | None = None) -> None:
+    token = str(runtime.get("artifact_token") or "").strip()
+    repo = str(runtime.get("repo") or "").strip()
+    ref = str(runtime.get("github_ref") or "main").strip() or "main"
+    if not token or not repo:
+        raise DatasocialError("GitHub workflow trigger chưa được cấu hình đủ token/repo.")
+
+    response = requests.post(
+        f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/dispatches",
+        headers=_github_headers(token),
+        json={"ref": ref, "inputs": inputs or {}},
+        timeout=30,
+    )
+    if response.status_code not in {200, 201, 204}:
+        raise DatasocialError(
+            f"GitHub workflow dispatch failed with HTTP {response.status_code}: {response.text[:500]}"
+        )
+
+
+def wait_for_github_workflow_completion(
+    runtime: dict[str, Any],
+    *,
+    workflow_file: str,
+    started_after: datetime,
+    timeout_seconds: int = 1800,
+    poll_interval_seconds: int = 15,
+) -> dict[str, Any]:
+    token = str(runtime.get("artifact_token") or "").strip()
+    repo = str(runtime.get("repo") or "").strip()
+    if not token or not repo:
+        raise DatasocialError("GitHub workflow polling chưa được cấu hình đủ token/repo.")
+
+    deadline = time.time() + timeout_seconds
+    matched_run_id = None
+    matched_run: dict[str, Any] | None = None
+    while time.time() < deadline:
+        response = requests.get(
+            f"https://api.github.com/repos/{repo}/actions/workflows/{workflow_file}/runs",
+            headers=_github_headers(token),
+            params={"event": "workflow_dispatch", "per_page": 10},
+            timeout=30,
+        )
+        response.raise_for_status()
+        runs = response.json().get("workflow_runs", [])
+        for run in runs:
+            created_at = str(run.get("created_at") or "").strip()
+            if not created_at:
+                continue
+            created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            if created_dt < started_after:
+                continue
+            matched_run_id = run.get("id")
+            matched_run = run
+            break
+
+        if matched_run_id is not None:
+            status = str(matched_run.get("status") or "").strip().lower()
+            if status == "completed":
+                return matched_run or {}
+        time.sleep(poll_interval_seconds)
+
+    raise DatasocialError(
+        f"Timed out waiting for workflow {workflow_file} to complete after dispatch."
+    )
+
+
+def notify_superadmins_workflow_result(
+    runtime: dict[str, Any],
+    *,
+    workflow_file: str,
+    run: dict[str, Any],
+) -> None:
+    if not runtime.get("superadmin_users"):
+        return
+    workflow_name = WORKFLOW_NAME_MAP.get(workflow_file, workflow_file)
+    conclusion = str(run.get("conclusion") or "-").strip()
+    html_url = str(run.get("html_url") or "").strip()
+    body = (
+        f"Workflow: {workflow_name}\n"
+        f"Status: {conclusion}\n"
+        f"Run ID: {run.get('id') or '-'}"
+    )
+    if html_url:
+        body += f"\nLink: {html_url}"
+    send_superadmin_alerts(
+        app_id=runtime["seatalk_app_id"],
+        app_secret=runtime["seatalk_app_secret"],
+        superadmins=runtime["superadmin_users"],
+        title="GitHub workflow completed",
+        body=body,
+    )
+
+
+def start_workflow_monitor(runtime: dict[str, Any], *, workflow_file: str, started_after: datetime) -> None:
+    def _runner() -> None:
+        try:
+            run = wait_for_github_workflow_completion(
+                runtime,
+                workflow_file=workflow_file,
+                started_after=started_after,
+            )
+            notify_superadmins_workflow_result(runtime, workflow_file=workflow_file, run=run)
+        except Exception as exc:
+            LOGGER.exception("Workflow monitor failed | workflow=%s", workflow_file)
+            if runtime.get("superadmin_users"):
+                send_superadmin_alerts(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    superadmins=runtime["superadmin_users"],
+                    title="GitHub workflow monitoring failed",
+                    body=f"Workflow: {WORKFLOW_NAME_MAP.get(workflow_file, workflow_file)}\nError: {type(exc).__name__}: {exc}",
+                )
+
+    thread = threading.Thread(target=_runner, daemon=True, name=f"workflow-monitor-{workflow_file}")
+    thread.start()
 
 
 def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
@@ -511,6 +643,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_interactive_click(self, event: dict[str, Any]) -> None:
             callback_context = build_callback_context(event)
+            unified_user = build_unified_user(
+                callback_context,
+                runtime.get("user_directory") or [],
+                env_directory=runtime.get("env_role_directory") or [],
+            )
             LOGGER.info(
                 "Seatalk callback context | %s",
                 json.dumps(callback_context, ensure_ascii=False, sort_keys=True),
@@ -528,7 +665,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             raw_value = extract_click_value(event)
             click_payload = parse_click_payload(raw_value)
             action = str(click_payload.get("action") or "").strip()
-            if action not in {"open_report", "reply_text"}:
+            if action not in {"open_report", "reply_text", "trigger_workflow"}:
                 raise SeatalkCallbackError(f"Unsupported interactive action: {action or '-'}")
 
             private_client = build_seatalk_client(
@@ -578,7 +715,27 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
             self._sync_store_if_needed("interactive_click")
 
-            if action == "reply_text":
+            if action == "trigger_workflow":
+                if unified_user.get("role") != "superadmin":
+                    private_client.send_text("**Bạn không có quyền dùng Điều Khiển Trung Tâm.**")
+                    return
+                workflow_file = str(click_payload.get("workflow") or "").strip()
+                if workflow_file not in WORKFLOW_NAME_MAP:
+                    raise SeatalkCallbackError(f"Unsupported workflow: {workflow_file or '-'}")
+                inputs = {"send_mode": "send"} if workflow_file == "ffvn-daily-send.yml" else {}
+                try:
+                    started_after = datetime.utcnow()
+                    trigger_github_workflow(runtime, workflow_file=workflow_file, inputs=inputs)
+                    start_workflow_monitor(runtime, workflow_file=workflow_file, started_after=started_after)
+                    private_client.send_text(
+                        f"**Đã kích hoạt {WORKFLOW_NAME_MAP[workflow_file]}**\n"
+                        "*Khi workflow chạy xong, tôi sẽ gửi thông báo kết quả về cho superadmin.*"
+                    )
+                except Exception as exc:
+                    private_client.send_text(
+                        f"**Kích hoạt workflow thất bại**\n*Chi tiết: {type(exc).__name__}: {exc}*"
+                    )
+            elif action == "reply_text":
                 message_text = str(click_payload.get("message") or "").strip()
                 if not message_text:
                     message_text = TREND_PLACEHOLDER_MESSAGES.get(
@@ -671,8 +828,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     now=datetime.now(),
                 )
             elif command == "imagelink":
+                group_client.send_text("**Imagelink đang chạy**\n*Tôi đang tải ảnh lên web nội bộ, vui lòng chờ một chút...*")
                 reply_text = self._handle_uploadimage_command(callback_context)
             elif command == "removebg":
+                group_client.send_text("**Removebg đang chạy**\n*Tôi đang tách nền ảnh, vui lòng chờ một chút...*")
                 reply_text = self._handle_removebg_command(callback_context)
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
@@ -813,6 +972,22 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 reply_text = format_scope_report(health_snapshot)
             elif command == "health":
                 reply_text = format_health_report(health_snapshot)
+            elif command in {"fetch", "send"}:
+                if unified_user.get("role") != "superadmin":
+                    reply_text = "**Bạn không có quyền dùng Điều Khiển Trung Tâm.**"
+                else:
+                    workflow_file = "ffvn-daily-fetch.yml" if command == "fetch" else "ffvn-daily-send.yml"
+                    inputs = {"send_mode": "send"} if workflow_file == "ffvn-daily-send.yml" else {}
+                    try:
+                        started_after = datetime.utcnow()
+                        trigger_github_workflow(runtime, workflow_file=workflow_file, inputs=inputs)
+                        start_workflow_monitor(runtime, workflow_file=workflow_file, started_after=started_after)
+                        reply_text = (
+                            f"**Đã kích hoạt {WORKFLOW_NAME_MAP[workflow_file]}**\n"
+                            "*Khi workflow chạy xong, tôi sẽ gửi thông báo kết quả về cho superadmin.*"
+                        )
+                    except Exception as exc:
+                        reply_text = f"**Kích hoạt workflow thất bại**\n*Chi tiết: {type(exc).__name__}: {exc}*"
             elif command == "web":
                 links_payload = load_json(Path("config/webcompany_links.json"))
                 lines = ["**Link web quan trọng của team**"]
@@ -839,8 +1014,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     now=datetime.now(),
                 )
             elif command == "imagelink":
+                private_client.send_text("**Imagelink đang chạy**\n*Tôi đang tải ảnh lên web nội bộ, vui lòng chờ một chút...*")
                 reply_text = self._handle_uploadimage_command(callback_context)
             elif command == "removebg":
+                private_client.send_text("**Removebg đang chạy**\n*Tôi đang tách nền ảnh, vui lòng chờ một chút...*")
                 reply_text = self._handle_removebg_command(callback_context)
             elif command in {"shortlink", "enhanceimage"}:
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
@@ -861,6 +1038,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             if reply_text:
                 private_client.send_text(reply_text)
+                if is_menu_shortcut and unified_user.get("role") == "superadmin":
+                    private_client.send_interactive(build_superadmin_control_payload())
                 LOGGER.info(
                     "Seatalk private command reply sent | employee_code=%s | command=%s",
                     employee_code,

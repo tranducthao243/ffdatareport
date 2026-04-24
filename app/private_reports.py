@@ -116,6 +116,54 @@ def _build_fallback_kol_entry(posts: list[StorePost], query: str) -> dict[str, A
     }
 
 
+def _expand_kol_channels(posts: list[StorePost], entry: dict[str, Any], query: str) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for channel in list(entry.get("channels") or []):
+        key = (
+            str(channel.get("platform") or "").strip().lower(),
+            str(channel.get("channelId") or "").strip(),
+            str(channel.get("channelName") or "").strip(),
+        )
+        merged[key] = {
+            "platform": key[0],
+            "channelId": key[1],
+            "channelName": key[2],
+        }
+
+    candidates = [normalize_command_text(query), normalize_command_text(str(entry.get("name") or ""))]
+    candidates.extend(normalize_command_text(str(item)) for item in (entry.get("aliases") or []))
+    normalized_candidates = list({candidate for candidate in candidates if candidate})
+
+    for post in posts:
+        if not post.is_kol:
+            continue
+        normalized_name = normalize_command_text(post.channel_name)
+        collapsed_name = normalized_name.replace(" ", "")
+        name_tokens = [token for token in normalized_name.split() if token]
+        matched = False
+        for candidate in normalized_candidates:
+            collapsed_candidate = candidate.replace(" ", "")
+            candidate_tokens = [token for token in candidate.split() if token]
+            if (
+                candidate == normalized_name
+                or collapsed_candidate == collapsed_name
+                or candidate in normalized_name
+                or normalized_name in candidate
+                or all(token in name_tokens or token in normalized_name for token in candidate_tokens)
+            ):
+                matched = True
+                break
+        if not matched:
+            continue
+        key = (post.platform, post.channel_id, post.channel_name)
+        merged[key] = {
+            "platform": post.platform,
+            "channelId": post.channel_id,
+            "channelName": post.channel_name,
+        }
+    return list(merged.values())
+
+
 def _format_top_posts(posts: list[StorePost], *, limit: int) -> list[str]:
     ranked = sorted(posts, key=lambda item: (item.view, item.engagement, item.published_at), reverse=True)[:limit]
     if not ranked:
@@ -203,7 +251,7 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
         )
 
     start_date, end_date = _recent_window(30, now=now)
-    channels = list(entry.get("channels") or [])
+    channels = _expand_kol_channels(posts, entry, query)
     scoped = _filter_posts_by_kol(posts, channels, start_date=start_date, end_date=end_date)
     grouped_channels = _group_channels_by_platform(channels)
     top_hashtags = _format_top_hashtags(scoped, limit=3)

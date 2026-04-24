@@ -86,6 +86,41 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     return grouped
 
 
+def build_superadmin_control_actions() -> list[dict[str, Any]]:
+    return [
+        {
+            "label": "Fetch",
+            "actionType": "trigger_workflow",
+            "workflow": "ffvn-daily-fetch.yml",
+            "callbackPayload": encode_callback_payload(
+                {
+                    "action": "trigger_workflow",
+                    "workflow": "ffvn-daily-fetch.yml",
+                }
+            ),
+        },
+        {
+            "label": "Send",
+            "actionType": "trigger_workflow",
+            "workflow": "ffvn-daily-send.yml",
+            "callbackPayload": encode_callback_payload(
+                {
+                    "action": "trigger_workflow",
+                    "workflow": "ffvn-daily-send.yml",
+                }
+            ),
+        },
+    ]
+
+
+def build_superadmin_control_payload() -> dict[str, Any]:
+    return build_interactive_payload(
+        title="Điều Khiển Trung Tâm",
+        description="Bấm để chạy workflow quét dữ liệu hoặc gửi báo cáo.",
+        actions=build_superadmin_control_actions(),
+    )
+
+
 def encode_callback_payload(payload: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
 
