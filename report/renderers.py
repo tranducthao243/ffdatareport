@@ -150,11 +150,6 @@ def render_topd(section: dict[str, Any]) -> list[str]:
                 f"- Total views: {compact_number(int(official_contribution.get('totalViews', 0) or 0))}",
                 f"- Total content: {int(official_contribution.get('totalClips', 0) or 0)}",
                 f"- Percentage: {official_contribution.get('percentage', 0)}%",
-                (
-                    "KOL nổi bật 7 ngày qua chưa tham gia campaign: "
-                    f"`{campaign.get('topKolsWithoutCampaignWindow', {}).get('from', '-')}"
-                    f" -> {campaign.get('topKolsWithoutCampaignWindow', {}).get('to', '-')}`"
-                ),
                 "",
                 "**5. TOP KOLs chưa tham gia campaign**",
             ]
