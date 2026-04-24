@@ -281,6 +281,20 @@ def build_report_package_by_code(
         if str(group.get("report_code") or "").strip() == report_code:
             selected_group = group
             break
+    # Private/ad-hoc campaign queries should show every configured campaign,
+    # not the subset pinned to a scheduled group send target.
+    if report_code == "TOPD_REPORT":
+        report_def = reports_config.get("reports", {}).get(report_code)
+        if not isinstance(report_def, dict):
+            raise DatasocialError(f"No enabled group is configured for report_code '{report_code}'.")
+        selected_group = {
+            "name": "adhoc_topd_report",
+            "enabled": True,
+            "report_code": report_code,
+            "title": report_def.get("title") or report_code,
+            "group_id": "",
+            "campaign_names": [item["name"] for item in campaigns_config if item.get("name")],
+        }
     if selected_group is None:
         report_def = reports_config.get("reports", {}).get(report_code)
         if not isinstance(report_def, dict):
