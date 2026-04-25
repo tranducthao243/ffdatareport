@@ -42,6 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--endpoint", help="Override GraphQL endpoint.")
     parser.add_argument("--preset", help="Load a JSON preset from the presets directory, e.g. ffvn_daily.")
     parser.add_argument("--usession", help="Auth cookie value. Falls back to DATASOCIAL_USESSION.")
+    parser.add_argument(
+        "--google-service-account-file",
+        help="Path to a Google service account credential file used to auto-exchange a Social Data usession.",
+    )
+    parser.add_argument(
+        "--google-service-account-json",
+        help="Raw Google service account JSON used to auto-exchange a Social Data usession.",
+    )
     parser.add_argument("--app-slug", help="App slug used to mimic browser referer, e.g. ffvn.")
     parser.add_argument(
         "--app-id",
@@ -279,6 +287,10 @@ def main() -> int:
         settings.endpoint = args.endpoint
     if args.usession:
         settings.usession = args.usession
+    if args.google_service_account_file:
+        settings.google_service_account_file = args.google_service_account_file
+    if args.google_service_account_json:
+        settings.google_service_account_json = args.google_service_account_json
     if args.app_slug:
         settings.app_slug = args.app_slug
     if args.app_id != DEFAULT_APP_ID:

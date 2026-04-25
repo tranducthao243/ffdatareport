@@ -7,8 +7,9 @@ from typing import Any
 
 import requests
 
+from .auth import exchange_google_access_token_for_usession
 from .config import Settings
-from .exceptions import GraphQLHTTPError, GraphQLResponseError
+from .exceptions import DatasocialError, GraphQLHTTPError, GraphQLResponseError
 from .exporter import (
     DEFAULT_EXPORT_TTL,
     build_daily_windows,
@@ -43,13 +44,26 @@ class GraphQLClient:
             }
         )
 
-        if settings.usession:
-            self.session.cookies.set(
-                "usession",
-                settings.usession,
-                domain="socialdata.garena.vn",
-                path="/",
-            )
+        self._apply_usession_cookie(settings.usession)
+        if not settings.usession and settings.has_service_account_auth:
+            self.refresh_usession_from_service_account()
+
+    def _apply_usession_cookie(self, usession: str) -> None:
+        value = str(usession or "").strip()
+        if not value:
+            return
+        self.settings.usession = value
+        self.session.cookies.set(
+            "usession",
+            value,
+            domain="socialdata.garena.vn",
+            path="/",
+        )
+
+    def refresh_usession_from_service_account(self) -> str:
+        usession = exchange_google_access_token_for_usession(self.settings)
+        self._apply_usession_cookie(usession)
+        return usession
 
     def list_posts(
         self,
@@ -624,6 +638,32 @@ class GraphQLClient:
             response.status_code,
         )
 
+        retry_with_fresh_session = (
+            response.ok
+            and self.settings.has_service_account_auth
+            and "Unauthorized" in response.text
+        ) or (
+            response.status_code == 401 and self.settings.has_service_account_auth
+        )
+        if retry_with_fresh_session:
+            LOGGER.warning("GRAPHQL unauthorized | operation=%s | refreshing usession from service account", operation_name)
+            try:
+                self.refresh_usession_from_service_account()
+            except DatasocialError as exc:
+                raise GraphQLResponseError(
+                    f"Social Data returned Unauthorized and service account refresh failed: {exc}"
+                ) from exc
+            response = self.session.post(
+                self.settings.endpoint,
+                data=json.dumps(payload),
+                timeout=self.settings.timeout,
+            )
+            LOGGER.info(
+                "GRAPHQL retry response | operation=%s | status=%s",
+                operation_name,
+                response.status_code,
+            )
+
         if not response.ok:
             LOGGER.error(
                 "GRAPHQL failed | operation=%s | status=%s | body_preview=%s",
@@ -646,8 +686,8 @@ class GraphQLClient:
             )
             if "Unauthorized" in error_text:
                 raise GraphQLResponseError(
-                    "Social Data returned Unauthorized. Check DATASOCIAL_USESSION in GitHub Actions secrets, "
-                    "especially the environment secret for 'ffvn-reporting', then rerun the workflow."
+                    "Social Data returned Unauthorized. Check the service account binding flow or DATASOCIAL_USESSION fallback configuration, "
+                    "then rerun the workflow."
                 )
             raise GraphQLResponseError(str(data["errors"]))
 
