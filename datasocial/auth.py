@@ -52,7 +52,7 @@ def get_google_access_token(settings: Settings) -> str:
     token = str(credentials.token or "").strip()
     if not token:
         raise DatasocialError("Google service account access token refresh returned an empty token.")
-    LOGGER.info("Refreshed Google access token using service account credentials.")
+    LOGGER.info("service_account_auth=ok | phase=google_access_token_refreshed")
     return token
 
 
@@ -89,5 +89,5 @@ def exchange_google_access_token_for_usession(
         raise DatasocialError(
             "Google callback exchange succeeded but no usession cookie was returned."
         )
-    LOGGER.info("Exchanged Google access token for Social Data usession.")
+    LOGGER.info("service_account_auth=ok | phase=usession_exchanged")
     return str(session_cookie).strip()

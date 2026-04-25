@@ -46,6 +46,7 @@ class GraphQLClient:
 
         self._apply_usession_cookie(settings.usession)
         if not settings.usession and settings.has_service_account_auth:
+            LOGGER.info("service_account_auth=enabled | phase=client_init")
             self.refresh_usession_from_service_account()
 
     def _apply_usession_cookie(self, usession: str) -> None:
@@ -61,8 +62,10 @@ class GraphQLClient:
         )
 
     def refresh_usession_from_service_account(self) -> str:
+        LOGGER.info("service_account_auth=enabled | phase=refresh_usession_start")
         usession = exchange_google_access_token_for_usession(self.settings)
         self._apply_usession_cookie(usession)
+        LOGGER.info("service_account_auth=ok | phase=refresh_usession_done")
         return usession
 
     def list_posts(
@@ -646,7 +649,10 @@ class GraphQLClient:
             response.status_code == 401 and self.settings.has_service_account_auth
         )
         if retry_with_fresh_session:
-            LOGGER.warning("GRAPHQL unauthorized | operation=%s | refreshing usession from service account", operation_name)
+            LOGGER.warning(
+                "GRAPHQL unauthorized | operation=%s | service_account_auth=enabled | phase=refresh_on_unauthorized",
+                operation_name,
+            )
             try:
                 self.refresh_usession_from_service_account()
             except DatasocialError as exc:
