@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from typing import Any
-
 from .identity import build_unified_user
 
 
-def is_authorized_private_sender(runtime: dict[str, Any], callback_context: dict[str, str]) -> bool:
+def is_authorized_private_sender(runtime: dict[str, object], callback_context: dict[str, str]) -> bool:
     directory = runtime.get("user_directory") or []
     env_directory = runtime.get("env_role_directory") or []
     if not directory and not env_directory:
@@ -43,6 +41,7 @@ def build_private_help_text(role: str) -> str:
                 "**Điều Khiển Trung Tâm**",
                 "- `fetch`: quét dữ liệu mới từ workflow FFVN Daily Fetch",
                 "- `send`: gửi báo cáo từ workflow FFVN Daily Send",
+                "- `so1`: gửi gói SO1 giống group chung kèm biểu đồ",
                 "",
             ]
         )
@@ -52,12 +51,13 @@ def build_private_help_text(role: str) -> str:
             "- `web`: liệt kê các link web quan trọng của team",
             "- `hashtag`: gõ hashtag và tên hashtag để check data",
             "- `kol`: gõ `kol <tên KOL>` để check data theo KOL",
+            "- `chart`: xem nhanh các biểu đồ 30 ngày",
             "",
             "**Dữ liệu KOLs**",
             "- `campaign`: báo cáo campaign hiện tại",
             "- `official`: báo cáo kênh Official",
             "- `dance`: báo cáo video trend nhảy",
-            "- `roblox`: báo cáo TOP video Roblox",
+            "- `roblox`: báo cáo TOP video Roblox kèm biểu đồ 30 ngày",
             "",
             "**Tính năng khác**",
             "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",

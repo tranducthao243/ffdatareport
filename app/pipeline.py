@@ -17,7 +17,7 @@ from .config_loader import (
     resolve_group_target,
     validate_reporting_config,
 )
-from .charting import build_campaign_30d_chart, build_kol_30d_chart, build_official_30d_chart
+from .charting import build_campaign_30d_chart, build_kol_30d_chart, build_official_30d_chart, build_roblox_30d_chart
 from .history import apply_history_deltas, build_daily_snapshot, save_daily_snapshot
 from .health import build_health_snapshot, format_health_alert
 
@@ -111,6 +111,8 @@ def build_configured_reports(
             topf_section = next((section for section in package["sections"] if section.get("code") == "TOPF"), None)
             if topf_section and topf_section.get("dailyChart"):
                 chart_paths.append(str(build_official_30d_chart(topf_section, title="Biểu Đồ View Official 30 ngày gần nhất")))
+        if "TOPH" in package["sectionCodes"]:
+            chart_paths.append(str(build_roblox_30d_chart(db_path, title="Biểu Đồ View Roblox 30 ngày gần nhất", now=now)))
         if chart_paths:
             package["chartPath"] = chart_paths[0]
             package["chartPaths"] = chart_paths
@@ -341,6 +343,8 @@ def build_report_package_by_code(
         topf_section = next((section for section in package["sections"] if section.get("code") == "TOPF"), None)
         if topf_section and topf_section.get("dailyChart"):
             chart_paths.append(str(build_official_30d_chart(topf_section, title="Biểu Đồ View Official 30 ngày gần nhất")))
+    if "TOPH" in package["sectionCodes"]:
+        chart_paths.append(str(build_roblox_30d_chart(db_path, title="Biểu Đồ View Roblox 30 ngày gần nhất", now=now)))
     if chart_paths:
         package["chartPath"] = chart_paths[0]
         package["chartPaths"] = chart_paths

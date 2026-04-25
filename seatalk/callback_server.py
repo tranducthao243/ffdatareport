@@ -798,10 +798,11 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             if command == "official":
                 self._send_thread_report_with_optional_chart(group_client, "TOPF_REPORT")
                 return
+            if command == "roblox":
+                self._send_thread_report_with_optional_chart(group_client, "TOPH_REPORT")
+                return
             if command == "dance":
                 reply_text = self._build_report_text("TOPG_REPORT")
-            elif command == "roblox":
-                reply_text = self._build_report_text("TOPH_REPORT")
             elif command == "web":
                 links_payload = load_json(Path("config/webcompany_links.json"))
                 lines = ["**Link web quan trọng của team**"]
@@ -962,10 +963,20 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command == "official":
                 self._send_private_report_with_optional_chart(private_client, "TOPF_REPORT")
                 return
+            elif command == "so1":
+                if unified_user.get("role") != "superadmin":
+                    reply_text = "**Bạn không có quyền dùng lệnh `so1`.**"
+                else:
+                    self._send_private_report_with_optional_chart(private_client, "SO1")
+                    return
+            elif command == "chart":
+                self._send_private_chart_bundle(private_client)
+                return
             elif command == "dance":
                 reply_text = self._build_report_text("TOPG_REPORT")
             elif command == "roblox":
-                reply_text = self._build_report_text("TOPH_REPORT")
+                self._send_private_report_with_optional_chart(private_client, "TOPH_REPORT")
+                return
             elif command == "data":
                 reply_text = format_data_report(health_snapshot)
             elif command == "scope":
@@ -1318,6 +1329,34 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _send_private_report_with_optional_chart(self, private_client: Any, report_code: str) -> None:
             self._send_thread_report_with_optional_chart(private_client, report_code)
+
+        def _send_private_chart_bundle(self, private_client: Any) -> None:
+            report_codes = ["SO1", "TOPD_REPORT", "TOPF_REPORT", "TOPH_REPORT"]
+            sent_chart_paths: set[str] = set()
+            private_client.send_text(
+                "**Biểu đồ nhanh 30 ngày**\n"
+                "*Tôi đang gửi lần lượt biểu đồ chung KOLs, campaign, official và roblox.*"
+            )
+            for report_code in report_codes:
+                package = build_report_package_by_code(
+                    runtime["db_path"],
+                    report_code=report_code,
+                    groups_path=runtime["groups_config"],
+                    reports_path=runtime["reports_config"],
+                    campaigns_path=runtime["campaigns_config"],
+                    timezone_name=runtime["report_timezone"],
+                    mode=runtime["report_mode"],
+                    source_scope={
+                        "category_ids": runtime["preset_category_ids"],
+                        "platform_ids": runtime["preset_platform_ids"],
+                    },
+                    now=datetime.now(),
+                )
+                for chart_path in [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]:
+                    if chart_path in sent_chart_paths:
+                        continue
+                    sent_chart_paths.add(chart_path)
+                    private_client.send_image_path(chart_path)
 
         def _build_reports_payload(self) -> dict[str, Any]:
             from app.pipeline import build_configured_reports

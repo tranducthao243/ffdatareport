@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from analyze.common import KOL_CATEGORY_IDS, KOL_PLATFORMS, filter_posts, load_posts
+from analyze.common import KOL_CATEGORY_IDS, KOL_PLATFORMS, ROBLOX_CATEGORY_IDS, filter_posts, load_posts
+from analyze.toph import ROBLOX_PLATFORMS
 
 
 def _compact_view(value: float) -> str:
@@ -45,7 +46,7 @@ def _build_daily_view_chart(
     fig, ax = plt.subplots(figsize=(14, 5.4))
     ax.plot(labels, values, color="#0f6cbd", linewidth=2.6)
     ax.fill_between(labels, values, color="#cfe8ff", alpha=0.45)
-    fig.suptitle(title, fontsize=18, fontweight="bold", y=0.985)
+    fig.suptitle(title, fontsize=18, fontweight="bold", y=0.99)
     ax.set_ylabel("View", fontsize=12)
     ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _position: _compact_view(value)))
     ax.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.35)
@@ -117,7 +118,6 @@ def build_kol_30d_chart(
     totals: dict[str, int] = {}
     peak_day_channels: dict[tuple[str, str, str], dict[str, Any]] = {}
     peak_day_total = -1
-    peak_day_iso = ""
     for offset in range(30):
         day = start_date + timedelta(days=offset)
         day_posts = [post for post in scoped if post.published_date == day]
@@ -126,7 +126,6 @@ def build_kol_30d_chart(
         totals[day_iso] = day_total
         if day_total > peak_day_total:
             peak_day_total = day_total
-            peak_day_iso = day_iso
             peak_day_channels = {}
             for post in day_posts:
                 key = (post.platform, post.channel_id, post.channel_name)
@@ -148,12 +147,16 @@ def build_kol_30d_chart(
         daily_points,
         title=title,
         include_weekday=False,
-        peak_channels=peak_channels if peak_day_iso else [],
+        peak_channels=peak_channels,
         filename_prefix="kol-30d-chart",
     )
 
 
-def build_campaign_30d_chart(campaign: dict[str, Any], *, title: str = "Biểu Đồ View Campaign 30 ngày gần nhất") -> Path:
+def build_campaign_30d_chart(
+    campaign: dict[str, Any],
+    *,
+    title: str = "Biểu Đồ View Campaign 30 ngày gần nhất",
+) -> Path:
     return _build_daily_view_chart(
         list(campaign.get("dailyChart") or []),
         title=title,
@@ -163,7 +166,11 @@ def build_campaign_30d_chart(campaign: dict[str, Any], *, title: str = "Biểu �
     )
 
 
-def build_official_30d_chart(section: dict[str, Any], *, title: str = "Biểu Đồ View Official 30 ngày gần nhất") -> Path:
+def build_official_30d_chart(
+    section: dict[str, Any],
+    *,
+    title: str = "Biểu Đồ View Official 30 ngày gần nhất",
+) -> Path:
     return _build_daily_view_chart(
         list(section.get("dailyChart") or []),
         title=title,
@@ -171,4 +178,57 @@ def build_official_30d_chart(section: dict[str, Any], *, title: str = "Biểu Đ
         peak_channels=list((section.get("peakDay") or {}).get("topChannels") or []),
         show_peak_channels=False,
         filename_prefix="official-30d-chart",
+    )
+
+
+def build_roblox_30d_chart(
+    db_path: Path,
+    *,
+    title: str = "Biểu Đồ View Roblox 30 ngày gần nhất",
+    now: datetime | None = None,
+) -> Path:
+    posts = load_posts(db_path)
+    anchor = (now or datetime.now()).date()
+    start_date = anchor - timedelta(days=29)
+    scoped = filter_posts(
+        posts,
+        start_date=start_date,
+        end_date=anchor,
+        platforms=ROBLOX_PLATFORMS,
+        category_ids=ROBLOX_CATEGORY_IDS,
+    )
+    totals: dict[str, int] = {}
+    peak_day_channels: dict[tuple[str, str, str], dict[str, Any]] = {}
+    peak_day_total = -1
+    for offset in range(30):
+        day = start_date + timedelta(days=offset)
+        day_posts = [post for post in scoped if post.published_date == day]
+        day_total = sum(post.view for post in day_posts)
+        day_iso = day.isoformat()
+        totals[day_iso] = day_total
+        if day_total > peak_day_total:
+            peak_day_total = day_total
+            peak_day_channels = {}
+            for post in day_posts:
+                key = (post.platform, post.channel_id, post.channel_name)
+                entry = peak_day_channels.setdefault(
+                    key,
+                    {"platform": post.platform, "channelName": post.channel_name, "totalViews": 0},
+                )
+                entry["totalViews"] = int(entry["totalViews"]) + post.view
+    peak_channels = [
+        item
+        for item in sorted(
+            peak_day_channels.values(),
+            key=lambda item: (int(item["totalViews"]), str(item["channelName"])),
+            reverse=True,
+        )[:3]
+    ]
+    daily_points = [{"date": day_iso, "totalViews": totals[day_iso]} for day_iso in sorted(totals)]
+    return _build_daily_view_chart(
+        daily_points,
+        title=title,
+        include_weekday=False,
+        peak_channels=peak_channels,
+        filename_prefix="roblox-30d-chart",
     )

@@ -111,12 +111,13 @@ def render_topd(section: dict[str, Any]) -> list[str]:
     campaigns = section.get("campaigns", [])
     if not campaigns:
         return lines + ["- Chưa có campaign nào được gán cho nhóm này."]
-    for campaign in campaigns:
+    for campaign_index, campaign in enumerate(campaigns, start=1):
         average_view_per_clip = campaign.get("averageViewPerClip", 0)
         official_contribution = campaign.get("officialContribution") or {}
+        if campaign_index > 1:
+            lines.extend(["", "---", ""])
         lines.extend(
             [
-                "",
                 f"**{campaign['campaignName']}** | {', '.join('#' + tag for tag in campaign['hashtags'])}",
                 "",
                 "**1. Overview**",

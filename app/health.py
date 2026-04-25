@@ -69,6 +69,10 @@ def classify_private_command(text: str) -> str:
         return "fetch"
     if normalized in {"send", "gui bao cao", "gui data"}:
         return "send"
+    if normalized in {"so1"}:
+        return "so1"
+    if normalized in {"chart", "bieu do", "bieu do"}:
+        return "chart"
     if normalized in {"campaign", "topd", "chien dich"}:
         return "campaign"
     if normalized in {"official", "topf", "kenh official"}:
