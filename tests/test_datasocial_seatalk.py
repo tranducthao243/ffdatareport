@@ -400,7 +400,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(elements[0]["title"]["text"], "Bao cao tong hop")
         self.assertEqual(elements[1]["description"]["text"], "Mo nhanh phan du lieu can xem them.")
 
-    def test_build_interactive_groups_unify_all_actions_into_single_card(self):
+    def test_build_interactive_groups_split_campaign_and_trend_cards(self):
         package = {
             "reportCode": "SO1",
             "groupName": "main",
@@ -410,12 +410,14 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         groups = build_interactive_groups(package)
 
-        self.assertEqual(len(groups), 1)
-        self.assertIn("tin nhắn cá nhân", groups[0]["description"])
-        self.assertEqual(len(groups[0]["actions"]), 4)
+        self.assertEqual(len(groups), 2)
+        self.assertEqual(groups[0]["description"], "")
+        self.assertEqual(len(groups[0]["actions"]), 2)
+        self.assertEqual(groups[1]["description"], "")
+        self.assertEqual(len(groups[1]["actions"]), 2)
 
         payload = build_interactive_group_payload(groups[0])
-        self.assertEqual(payload["interactive_message"]["elements"][0]["element_type"], "description")
+        self.assertEqual(payload["interactive_message"]["elements"][0]["element_type"], "button_group")
 
     def test_parse_click_payload_decodes_json_value(self):
         payload = parse_click_payload('{"action":"open_report","target_report_code":"TOPD_REPORT"}')
@@ -803,7 +805,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         result = send_report_packages(packages, app_id="id", app_secret="secret")
 
         client.send_text.assert_called_once()
-        self.assertEqual(client.send_interactive.call_count, 1)
+        self.assertEqual(client.send_interactive.call_count, 2)
         self.assertEqual(result[0]["status"], "sent")
         self.assertEqual(result[0]["interactiveStatus"], "sent")
 

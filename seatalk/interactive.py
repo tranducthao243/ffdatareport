@@ -67,12 +67,25 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     actions = list(package.get("interactiveActions") or [])
     if not actions:
         return []
-    return [
-        {
-            "description": "Bấm nút để xem thông tin khác, thông tin sẽ gửi qua tin nhắn cá nhân.",
-            "actions": actions[:5],
-        }
-    ]
+    campaign_actions = [item for item in actions if item.get("actionGroup") == "campaign_official"]
+    trend_actions = [item for item in actions if item.get("actionGroup") == "trend"]
+
+    groups: list[dict[str, Any]] = []
+    if campaign_actions:
+        groups.append(
+            {
+                "description": "",
+                "actions": campaign_actions[:3],
+            }
+        )
+    if trend_actions:
+        groups.append(
+            {
+                "description": "",
+                "actions": trend_actions[:3],
+            }
+        )
+    return groups
 
 
 def build_superadmin_control_actions() -> list[dict[str, Any]]:
