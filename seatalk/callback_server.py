@@ -1375,7 +1375,24 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         len(interactive_group.get("actions") or []),
                         json.dumps(interactive_payload, ensure_ascii=False),
                     )
-                    send_result = private_client.send_interactive(interactive_payload)
+                    try:
+                        send_result = private_client.send_interactive(interactive_payload)
+                    except Exception as exc:
+                        LOGGER.exception(
+                            "Private interactive send failed | report_code=%s | error_type=%s | error=%s",
+                            report_code,
+                            type(exc).__name__,
+                            exc,
+                        )
+                        private_client.send_text(
+                            "**SeaTalk private chat không hiển thị được card nút trong lần gửi này**\n"
+                            "*Bạn vẫn có thể gõ trực tiếp các lệnh sau để xem tiếp dữ liệu:*\n"
+                            "- `campaign`\n"
+                            "- `official`\n"
+                            "- `dance`\n"
+                            "- `roblox`"
+                        )
+                        continue
                     LOGGER.info(
                         "Private interactive send success | report_code=%s | result=%s",
                         report_code,
