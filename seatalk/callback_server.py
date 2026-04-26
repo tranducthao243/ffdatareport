@@ -39,7 +39,7 @@ from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .alerts import send_superadmin_alerts
 from .group_thread_service import is_allowed_ctv_group as service_is_allowed_ctv_group, split_csv_env
-from .interactive import build_interactive_groups, build_superadmin_control_payload
+from .interactive import build_interactive_actions, build_interactive_groups, build_superadmin_control_payload
 from .payloads import build_interactive_group_payload
 from .private_bot_service import (
     build_private_help_text as service_build_private_help_text,
@@ -1354,10 +1354,19 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     f"Report: {report_code}\nError: {type(exc).__name__}: {exc}",
                 )
                 raise
+            interactive_actions = list(package.get("interactiveActions") or [])
+            if not interactive_actions and report_code == "SO1":
+                interactive_actions = build_interactive_actions({"reportCode": "SO1"})
+                package["interactiveActions"] = interactive_actions
+            LOGGER.info(
+                "Private interactive package prepared | report_code=%s | interactive_action_count=%s",
+                report_code,
+                len(interactive_actions),
+            )
             private_client.send_text(str(package.get("renderedText") or "").strip())
             for chart_path in [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]:
                 private_client.send_image_path(chart_path)
-            if package.get("interactiveActions"):
+            if interactive_actions:
                 for interactive_group in build_interactive_groups(package):
                     private_client.send_interactive(build_interactive_group_payload(interactive_group))
 
