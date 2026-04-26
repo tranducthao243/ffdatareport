@@ -13,7 +13,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
 
     return [
         {
-            "label": "Xem Campaign",
+            "label": "Campaign",
             "actionType": "open_report",
             "targetReportCode": "TOPD_REPORT",
             "actionGroup": "campaign_official",
@@ -25,7 +25,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             ),
         },
         {
-            "label": "Xem kênh Official",
+            "label": "Kênh Official",
             "actionType": "open_report",
             "targetReportCode": "TOPF_REPORT",
             "actionGroup": "campaign_official",
@@ -37,7 +37,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             ),
         },
         {
-            "label": "Trend nhảy",
+            "label": "Trend Nhảy",
             "actionType": "open_report",
             "targetReportCode": "TOPG_REPORT",
             "actionGroup": "trend",
@@ -49,7 +49,7 @@ def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
             ),
         },
         {
-            "label": "Roblox Content",
+            "label": "Roblox",
             "actionType": "open_report",
             "targetReportCode": "TOPH_REPORT",
             "actionGroup": "trend",
