@@ -1368,7 +1368,19 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 private_client.send_image_path(chart_path)
             if interactive_actions:
                 for interactive_group in build_interactive_groups(package):
-                    private_client.send_interactive(build_interactive_group_payload(interactive_group))
+                    interactive_payload = build_interactive_group_payload(interactive_group)
+                    LOGGER.info(
+                        "Private interactive send start | report_code=%s | action_count=%s | payload=%s",
+                        report_code,
+                        len(interactive_group.get("actions") or []),
+                        json.dumps(interactive_payload, ensure_ascii=False),
+                    )
+                    send_result = private_client.send_interactive(interactive_payload)
+                    LOGGER.info(
+                        "Private interactive send success | report_code=%s | result=%s",
+                        report_code,
+                        json.dumps(send_result, ensure_ascii=False, sort_keys=True),
+                    )
 
         def _send_private_chart_bundle(self, private_client: Any) -> None:
             report_codes = ["SO1", "TOPD_REPORT", "TOPF_REPORT", "TOPH_REPORT"]
