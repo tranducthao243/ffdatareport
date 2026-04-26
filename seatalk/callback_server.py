@@ -39,7 +39,8 @@ from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .alerts import send_superadmin_alerts
 from .group_thread_service import is_allowed_ctv_group as service_is_allowed_ctv_group, split_csv_env
-from .interactive import build_superadmin_control_payload
+from .interactive import build_interactive_groups, build_superadmin_control_payload
+from .payloads import build_interactive_group_payload
 from .private_bot_service import (
     build_private_help_text as service_build_private_help_text,
     build_private_usage_text as service_build_private_usage_text,
@@ -967,7 +968,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 if unified_user.get("role") != "superadmin":
                     reply_text = "**Bạn không có quyền dùng lệnh `so1`.**"
                 else:
-                    self._send_private_report_with_optional_chart(private_client, "SO1")
+                    self._send_private_report_with_interactions(private_client, "SO1")
                     return
             elif command == "chart":
                 self._send_private_chart_bundle(private_client)
@@ -1329,6 +1330,36 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _send_private_report_with_optional_chart(self, private_client: Any, report_code: str) -> None:
             self._send_thread_report_with_optional_chart(private_client, report_code)
+
+        def _send_private_report_with_interactions(self, private_client: Any, report_code: str) -> None:
+            try:
+                package = build_report_package_by_code(
+                    runtime["db_path"],
+                    report_code=report_code,
+                    groups_path=runtime["groups_config"],
+                    reports_path=runtime["reports_config"],
+                    campaigns_path=runtime["campaigns_config"],
+                    timezone_name=runtime["report_timezone"],
+                    mode=runtime["report_mode"],
+                    source_scope={
+                        "category_ids": runtime["preset_category_ids"],
+                        "platform_ids": runtime["preset_platform_ids"],
+                    },
+                    now=datetime.now(),
+                )
+            except Exception as exc:
+                self._notify_superadmins_once(
+                    f"report:{report_code}:{type(exc).__name__}:{exc}",
+                    "Lá»—i dá»±ng bÃ¡o cÃ¡o private/group",
+                    f"Report: {report_code}\nError: {type(exc).__name__}: {exc}",
+                )
+                raise
+            private_client.send_text(str(package.get("renderedText") or "").strip())
+            for chart_path in [str(item).strip() for item in (package.get("chartPaths") or []) if str(item).strip()]:
+                private_client.send_image_path(chart_path)
+            if package.get("interactiveActions"):
+                for interactive_group in build_interactive_groups(package):
+                    private_client.send_interactive(build_interactive_group_payload(interactive_group))
 
         def _send_private_chart_bundle(self, private_client: Any) -> None:
             report_codes = ["SO1", "TOPD_REPORT", "TOPF_REPORT", "TOPH_REPORT"]
