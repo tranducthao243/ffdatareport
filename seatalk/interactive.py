@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .payloads import build_interactive_payload
+
 
 def build_interactive_actions(package: dict[str, Any]) -> list[dict[str, Any]]:
     report_code = str(package.get("reportCode") or "").strip()
@@ -65,25 +67,12 @@ def build_interactive_groups(package: dict[str, Any]) -> list[dict[str, Any]]:
     actions = list(package.get("interactiveActions") or [])
     if not actions:
         return []
-    grouped: list[dict[str, Any]] = []
-    campaign_actions = [item for item in actions if item.get("actionGroup") == "campaign_official"]
-    trend_actions = [item for item in actions if item.get("actionGroup") == "trend"]
-
-    if campaign_actions:
-        grouped.append(
-            {
-                "description": "Nhấn nút để nhận thêm dữ liệu Campaign hoặc kênh Official qua tin nhắn riêng.",
-                "actions": campaign_actions[:5],
-            }
-        )
-    if trend_actions:
-        grouped.append(
-            {
-                "description": "Nhấn nút để xem thêm dữ liệu Trend Nhảy và Roblox Content qua tin nhắn riêng.",
-                "actions": trend_actions[:5],
-            }
-        )
-    return grouped
+    return [
+        {
+            "description": "Bấm nút để xem thông tin khác, thông tin sẽ gửi qua tin nhắn cá nhân.",
+            "actions": actions[:5],
+        }
+    ]
 
 
 def build_superadmin_control_actions() -> list[dict[str, Any]]:
