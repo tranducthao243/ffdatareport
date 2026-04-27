@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from analyze.common import load_posts
 from normalize import sqlite_store_summary
@@ -25,6 +26,8 @@ PLATFORM_LABELS = {
     2: "YouTube",
 }
 
+VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
+
 
 def compact_number(value: int) -> str:
     absolute = abs(value)
@@ -33,6 +36,23 @@ def compact_number(value: int) -> str:
     if absolute >= 1_000:
         return f"{value / 1_000:.1f}K"
     return str(value)
+
+
+def format_vietnam_datetime(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    try:
+        if "T" not in text and len(text) == 10:
+            return date.fromisoformat(text).strftime("%d-%m-%Y")
+        normalized = text.replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        local_dt = parsed.astimezone(VIETNAM_TIMEZONE)
+        return local_dt.strftime("%d-%m-%Y %H:%M")
+    except ValueError:
+        return text
 
 
 def format_issue_label(code: str) -> str:
@@ -442,6 +462,61 @@ def format_health_alert(snapshot: dict[str, Any]) -> str:
             "*Nếu cần mở quyền bot hoặc kiểm tra lại nguồn dữ liệu, vui lòng liên hệ ducthao.tran@garena.vn.*",
         ]
     )
+    return "\n".join(lines).strip()
+
+
+def format_data_report(snapshot: dict[str, Any]) -> str:
+    store = snapshot["storeSummary"]
+    platform_counts = store.get("platformCounts", {})
+    lines = [
+        "**Dữ liệu đang dùng**",
+        f"*SQLite: `{store['dbPath']}`*",
+        f"- Khung dữ liệu đang quét: `{format_vietnam_datetime(store.get('minPublishedDate', '-'))} -> {format_vietnam_datetime(store.get('maxPublishedDate', '-'))}`",
+        f"- Cập nhật lần cuối: `{format_vietnam_datetime(store.get('lastInsertedAt', '-'))}`",
+        f"- Bài viết: {store['postCount']}",
+        f"- Kênh: {store['channelCount']}",
+        f"- Tổng view: {compact_number(store['totalView'])}",
+    ]
+    active_campaigns = snapshot.get("activeCampaigns") or []
+    if active_campaigns:
+        lines.append("- Campaign đang active: " + ", ".join(item["name"] for item in active_campaigns))
+    else:
+        lines.append("- Campaign đang active: không có")
+    if platform_counts:
+        lines.append("- Phân bổ theo nền tảng:")
+        for platform, count in platform_counts.items():
+            lines.append(f"  - {platform}: {count} bài")
+    return "\n".join(lines)
+
+
+def format_health_alert(snapshot: dict[str, Any]) -> str:
+    store = snapshot.get("storeSummary", {})
+    critical_issues = [item for item in (snapshot.get("issues") or []) if item.get("severity") == "critical"]
+    warning_issues = [item for item in (snapshot.get("issues") or []) if item.get("severity") == "warning"]
+    active_campaigns = snapshot.get("activeCampaigns") or []
+    lines = [
+        "**Cảnh báo dữ liệu FFVN**",
+        "*Bot tạm dừng gửi báo cáo vào group vì phát hiện vấn đề trong bộ dữ liệu hiện tại.*",
+        "",
+        f"- Cập nhật lần cuối: `{format_vietnam_datetime(store.get('lastInsertedAt') or snapshot.get('generatedAt', '-'))}`",
+        f"- Dữ liệu đang bao phủ: `{format_vietnam_datetime(store.get('minPublishedDate') or '-')} -> {format_vietnam_datetime(store.get('maxPublishedDate') or '-')}`",
+        f"- Tổng bài viết: {store.get('postCount', 0)} | Tổng kênh: {store.get('channelCount', 0)}",
+    ]
+    if active_campaigns:
+        lines.append("- Campaign đang active: " + ", ".join(item.get("name", "-") for item in active_campaigns))
+    lines.extend(["", "**Nghiêm trọng**"])
+    if critical_issues:
+        for issue in critical_issues:
+            lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
+    else:
+        lines.append("- Không có lỗi nghiêm trọng.")
+    lines.extend(["", "**Cảnh báo / Theo dõi thêm**"])
+    if warning_issues:
+        for issue in warning_issues:
+            lines.append(f"- {format_issue_label(issue['code'])}: {issue['message']}")
+    else:
+        lines.append("- Không có cảnh báo cần theo dõi thêm.")
+    lines.extend(["", "*Nếu cần mở quyền bot hoặc kiểm tra lại nguồn dữ liệu, vui lòng liên hệ ducthao.tran@garena.vn.*"])
     return "\n".join(lines).strip()
 
 
