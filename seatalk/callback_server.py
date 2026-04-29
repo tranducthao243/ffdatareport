@@ -1324,7 +1324,32 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     channel=primary_channel,
                     daily_chart=daily_chart,
                 )
-                private_client.send_image_path(str(chart_path))
+                LOGGER.info(
+                    "Private KOL chart prepared | channel=%s | platform=%s | chart_path=%s | chart_points=%s",
+                    primary_channel.get("channelName") or "-",
+                    primary_channel.get("platform") or "-",
+                    chart_path,
+                    len(daily_chart),
+                )
+                try:
+                    send_result = private_client.send_image_path(str(chart_path))
+                    LOGGER.info(
+                        "Private KOL chart send success | channel=%s | result=%s",
+                        primary_channel.get("channelName") or "-",
+                        json.dumps(send_result, ensure_ascii=False, sort_keys=True),
+                    )
+                except Exception as exc:
+                    LOGGER.exception(
+                        "Private KOL chart send failed | channel=%s | error_type=%s | error=%s",
+                        primary_channel.get("channelName") or "-",
+                        type(exc).__name__,
+                        exc,
+                    )
+                    private_client.send_text(
+                        "**Biểu đồ kênh KOL chưa gửi được trong lần này**\n"
+                        f"*Kênh đang chọn: {primary_channel.get('channelName') or '-'} ({primary_channel.get('platform') or '-'})*\n"
+                        f"*Chi tiết: {type(exc).__name__}: {exc}*"
+                    )
 
         def _send_thread_report_with_optional_chart(self, client: Any, report_code: str) -> None:
             try:
