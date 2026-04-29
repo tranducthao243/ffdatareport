@@ -1016,12 +1016,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command == "hashtag":
                 reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
             elif command == "kol":
-                reply_text = format_kol_report(
-                    runtime["db_path"],
-                    message_text,
-                    mapping_path=runtime["kol_mapping_path"],
-                    now=datetime.now(),
-                )
+                self._send_private_kol_report(private_client, message_text)
+                return
             elif command == "imagelink":
                 private_client.send_text("**Imagelink đang chạy**\n*Tôi đang tải ảnh lên web nội bộ, vui lòng chờ một chút...*")
                 reply_text = self._handle_uploadimage_command(callback_context)
