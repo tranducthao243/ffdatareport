@@ -12,6 +12,7 @@ from seatalk.alerts import send_superadmin_alerts
 
 from .config_loader import (
     format_validation_errors,
+    get_group_target_label,
     is_group_send_enabled,
     load_json,
     resolve_group_target,
@@ -208,6 +209,7 @@ def build_configured_reports(
         {
             "groupName": package["groupName"],
             "reportCode": package["reportCode"],
+            "groupIdEnv": get_group_target_label(group_lookup[package["groupName"]]),
             "sectionCodes": package["sectionCodes"],
             "sectionCount": package["sectionCount"],
             "hasResolvedGroupId": bool(package["resolvedGroupId"]),

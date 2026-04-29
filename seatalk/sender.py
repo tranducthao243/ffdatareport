@@ -23,6 +23,10 @@ def send_report_packages(
                     "reportCode": package["reportCode"],
                     "status": "skipped",
                     "reason": "missing_group_id",
+                    "groupIdEnv": package.get("groupIdEnv", ""),
+                    "message": (
+                        f"Missing resolved group id from '{package.get('groupIdEnv', '') or 'group_id'}'."
+                    ),
                 }
             )
             continue

@@ -28,6 +28,15 @@ def is_group_send_enabled(group: dict[str, Any]) -> bool:
     return bool(group.get("send_enabled", True))
 
 
+def get_group_target_label(group: dict[str, Any]) -> str:
+    if group.get("group_id"):
+        return "group_id"
+    env_key = str(group.get("group_id_env") or "").strip()
+    if env_key:
+        return env_key
+    return ""
+
+
 def validate_reporting_config(
     groups_config: dict[str, Any],
     reports_config: dict[str, Any],
@@ -232,11 +241,15 @@ def validate_reporting_config(
                 state["messages"].append("official_source_disabled")
 
         if state["sendEnabled"] and not state["resolvedGroupId"]:
+            target_label = get_group_target_label(group) or "group_id"
             warnings.append(
                 {
                     "code": "missing_group_id",
                     "groupName": name,
-                    "message": f"Group '{name}' has no resolved group id. It will be built but skipped during send.",
+                    "message": (
+                        f"Group '{name}' has no resolved group id from '{target_label}'. "
+                        "It will be built but skipped during send."
+                    ),
                 }
             )
             state["messages"].append("missing_group_id")
