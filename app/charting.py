@@ -247,7 +247,7 @@ def build_kol_channel_30d_chart(
         "youtube": "YouTube",
         "facebook": "Facebook",
     }.get(platform, platform.title() or "KOL")
-    chart_title = title or f"Biá»ƒu Äá»“ View kÃªnh {platform_label} 30 ngÃ y - {channel_name}"
+    chart_title = title or f"Biểu Đồ View kênh {platform_label} 30 ngày - {channel_name}"
     filename_slug = f"kol-channel-{platform}-{channel_name}".replace(" ", "-").replace("/", "-").lower()
     return _build_daily_view_chart(
         list(daily_chart or []),
