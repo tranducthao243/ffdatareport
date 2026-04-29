@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 from PIL import Image
 
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report, normalize_command_text
-from app.private_reports import format_hashtag_report_v2, format_kol_report
+from app.private_reports import build_kol_report_data, format_hashtag_report_v2, format_kol_report
 from report.renderers import render_topd
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
@@ -286,6 +286,79 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             self.assertIn("KOL: Hiếu Đầu Đà", answer)
             self.assertIn("Tổng view:", answer)
+
+    def test_build_kol_report_data_picks_highest_view_channel_for_chart(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Youtube",
+                "Channel id": "yt-1",
+                "Channel name": "Jeeker YT",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "yt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #freefire",
+                "Link": "https://youtube.com/watch?v=1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#freefire",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "200000",
+            },
+            {
+                "ID": "2",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "Jeeker TT",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 2 #ff",
+                "Link": "https://tiktok.com/@jeeker/video/1",
+                "Publish time": "2026-04-18 10:00:00",
+                "Hashtag": "#ff",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "600000",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            mapping_path = root / "kols.json"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+            mapping_path.write_text(
+                json.dumps(
+                    {
+                        "kols": [
+                            {
+                                "name": "Jeeker",
+                                "aliases": ["jeeker"],
+                                "channels": [
+                                    {"platform": "youtube", "channelName": "Jeeker YT"},
+                                    {"platform": "tiktok", "channelName": "Jeeker TT"},
+                                ],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            report_data = build_kol_report_data(db_path, "kol Jeeker", mapping_path=mapping_path)
+
+            self.assertEqual(report_data["primaryChannel"]["platform"], "tiktok")
+            self.assertEqual(report_data["primaryChannel"]["channelName"], "Jeeker TT")
+            self.assertEqual(len(report_data["primaryChannelDailyChart"]), 30)
 
     def test_build_unified_user_resolves_superadmin_by_email(self):
         callback_context = {

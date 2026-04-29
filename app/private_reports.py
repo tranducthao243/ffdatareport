@@ -284,6 +284,79 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
     return "\n".join(lines)
 
 
+def build_kol_report_data(db_path: Path, text: str, *, mapping_path: Path, now: datetime | None = None) -> dict[str, Any]:
+    query = _extract_kol_query(text)
+    if not query:
+        return {"error": "KOL: -\n\nVui lÃ²ng dÃ¹ng cÃº phÃ¡p: `kol <tÃªn KOL>`."}
+
+    posts = load_posts(db_path)
+    mapping = _load_kol_mapping(mapping_path)
+    entry = _find_kol_entry(mapping, query) or _build_fallback_kol_entry(posts, query)
+    if not entry:
+        return {
+            "error": (
+                f"KOL: {query}\n\n"
+                "KhÃ´ng tÃ¬m tháº¥y cáº¥u hÃ¬nh hoáº·c tÃªn kÃªnh KOL trong há»‡ thá»‘ng.\n"
+                "HÃ£y bá»• sung KOL vÃ o `config/kol_channels.json` vá»›i `name`, `aliases` vÃ  `channels`, "
+                "hoáº·c gÃµ Ä‘Ãºng tÃªn kÃªnh KOL Ä‘ang cÃ³ trong data."
+            )
+        }
+
+    start_date, end_date = _recent_window(30, now=now)
+    channels = _expand_kol_channels(posts, entry, query)
+    scoped = _filter_posts_by_kol(posts, channels, start_date=start_date, end_date=end_date)
+
+    channel_totals: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for post in scoped:
+        key = (post.platform, post.channel_id, post.channel_name)
+        summary = channel_totals.setdefault(
+            key,
+            {
+                "platform": post.platform,
+                "channelId": post.channel_id,
+                "channelName": post.channel_name,
+                "totalViews": 0,
+                "totalClips": 0,
+            },
+        )
+        summary["totalViews"] += post.view
+        summary["totalClips"] += 1
+
+    ranked_channels = sorted(
+        channel_totals.values(),
+        key=lambda item: (int(item["totalViews"]), int(item["totalClips"]), str(item["channelName"])),
+        reverse=True,
+    )
+    primary_channel = ranked_channels[0] if ranked_channels else None
+    daily_views: dict[str, int] = {}
+    if primary_channel:
+        for post in scoped:
+            if (
+                post.platform == primary_channel["platform"]
+                and post.channel_id == primary_channel["channelId"]
+                and post.channel_name == primary_channel["channelName"]
+            ):
+                day_iso = post.published_date.isoformat()
+                daily_views[day_iso] = int(daily_views.get(day_iso, 0)) + post.view
+
+    daily_chart = [
+        {
+            "date": current_day.isoformat(),
+            "totalViews": int(daily_views.get(current_day.isoformat(), 0)),
+        }
+        for current_day in (
+            start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)
+        )
+    ]
+
+    return {
+        "query": query,
+        "entry": entry,
+        "primaryChannel": primary_channel,
+        "primaryChannelDailyChart": daily_chart,
+    }
+
+
 def format_hashtag_report_v2(db_path: Path, text: str, *, now: datetime | None = None) -> str:
     query = extract_hashtag_query(text)
     if not query:

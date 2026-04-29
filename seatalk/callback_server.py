@@ -19,6 +19,7 @@ import zipfile
 import requests
 
 from app.pipeline import build_report_package_by_code
+from app.charting import build_kol_channel_30d_chart
 from app.config_loader import load_json
 from app.data_chat import answer_data_question
 from app.health import (
@@ -30,7 +31,7 @@ from app.health import (
     format_scope_report,
     normalize_command_text,
 )
-from app.private_reports import format_hashtag_report_v2, format_kol_report
+from app.private_reports import build_kol_report_data, format_hashtag_report_v2, format_kol_report
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
 from datasocial.seatalk import SeaTalkError
@@ -823,12 +824,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command == "hashtag":
                 reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
             elif command == "kol":
-                reply_text = format_kol_report(
-                    runtime["db_path"],
-                    message_text,
-                    mapping_path=runtime["kol_mapping_path"],
-                    now=datetime.now(),
-                )
+                self._send_private_kol_report(private_client, message_text)
+                return
             elif command == "imagelink":
                 group_client.send_text("**Imagelink đang chạy**\n*Tôi đang tải ảnh lên web nội bộ, vui lòng chờ một chút...*")
                 reply_text = self._handle_uploadimage_command(callback_context)
@@ -1300,6 +1297,34 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 raise
             return str(package.get("renderedText") or "").strip()
+
+        def _send_private_kol_report(self, private_client: Any, message_text: str) -> None:
+            report_data = build_kol_report_data(
+                runtime["db_path"],
+                message_text,
+                mapping_path=runtime["kol_mapping_path"],
+                now=datetime.now(),
+            )
+            if report_data.get("error"):
+                private_client.send_text(str(report_data["error"]))
+                return
+
+            private_client.send_text(
+                format_kol_report(
+                    runtime["db_path"],
+                    message_text,
+                    mapping_path=runtime["kol_mapping_path"],
+                    now=datetime.now(),
+                )
+            )
+            primary_channel = report_data.get("primaryChannel") or {}
+            daily_chart = list(report_data.get("primaryChannelDailyChart") or [])
+            if primary_channel and daily_chart:
+                chart_path = build_kol_channel_30d_chart(
+                    channel=primary_channel,
+                    daily_chart=daily_chart,
+                )
+                private_client.send_image_path(str(chart_path))
 
         def _send_thread_report_with_optional_chart(self, client: Any, report_code: str) -> None:
             try:

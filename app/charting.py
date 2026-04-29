@@ -232,3 +232,28 @@ def build_roblox_30d_chart(
         peak_channels=peak_channels,
         filename_prefix="roblox-30d-chart",
     )
+
+
+def build_kol_channel_30d_chart(
+    *,
+    channel: dict[str, Any],
+    daily_chart: list[dict[str, Any]],
+    title: str | None = None,
+) -> Path:
+    channel_name = str(channel.get("channelName") or "-").strip()
+    platform = str(channel.get("platform") or "").strip().lower()
+    platform_label = {
+        "tiktok": "TikTok",
+        "youtube": "YouTube",
+        "facebook": "Facebook",
+    }.get(platform, platform.title() or "KOL")
+    chart_title = title or f"Biá»ƒu Äá»“ View kÃªnh {platform_label} 30 ngÃ y - {channel_name}"
+    filename_slug = f"kol-channel-{platform}-{channel_name}".replace(" ", "-").replace("/", "-").lower()
+    return _build_daily_view_chart(
+        list(daily_chart or []),
+        title=chart_title,
+        include_weekday=False,
+        peak_channels=[],
+        show_peak_channels=False,
+        filename_prefix=filename_slug,
+    )
