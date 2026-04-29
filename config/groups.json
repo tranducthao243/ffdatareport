@@ -11,8 +11,8 @@
       "name": "ffvn_kol_group",
       "enabled": true,
       "report_code": "SO2",
-      "title": "Báo cáo tự động Nhà Sáng Tạo Free Fire",
-      "group_id_env": "SEATALK_CAMPAIGN_GROUP_ID"
+      "title": "Báo cáo tự động KOL Free Fire",
+      "group_id_env": "SEATALK_KOL_GROUP_ID"
     },
     {
       "name": "ffvn_campaign_daily",
