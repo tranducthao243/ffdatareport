@@ -257,3 +257,22 @@ def build_kol_channel_30d_chart(
         show_peak_channels=False,
         filename_prefix=filename_slug,
     )
+
+
+def build_hashtag_30d_chart(
+    *,
+    hashtag: str,
+    daily_chart: list[dict[str, Any]],
+    title: str | None = None,
+) -> Path:
+    normalized_hashtag = str(hashtag or "").strip().lstrip("#")
+    chart_title = title or f"Biểu Đồ View hashtag #{normalized_hashtag} 30 ngày"
+    filename_slug = f"hashtag-{normalized_hashtag}".replace(" ", "-").replace("/", "-").lower()
+    return _build_daily_view_chart(
+        list(daily_chart or []),
+        title=chart_title,
+        include_weekday=False,
+        peak_channels=[],
+        show_peak_channels=False,
+        filename_prefix=filename_slug,
+    )

@@ -1,11 +1,12 @@
 import unittest
 import base64
 import json
+from datetime import datetime
 from unittest.mock import Mock, patch
 from PIL import Image
 
 from app.health import classify_private_command, extract_hashtag_query, format_hashtag_report, normalize_command_text
-from app.private_reports import build_kol_report_data, format_hashtag_report_v2, format_kol_report
+from app.private_reports import build_hashtag_report_data, build_kol_report_data, format_hashtag_report_v2, format_kol_report
 from report.renderers import render_topd
 from datasocial.formatter import render_seatalk_report
 from datasocial.seatalk import SeaTalkClient, SeaTalkSettings
@@ -176,6 +177,107 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             self.assertIn("TOP VIDEO NỔI BẬT (7 NGÀY)", answer)
             self.assertIn("Official contribution:", answer)
             self.assertIn("Percentage:", answer)
+
+    def test_build_hashtag_report_data_builds_30_day_chart(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "KOL One",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #ob53",
+                "Link": "https://www.tiktok.com/@kol/video/1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            },
+            {
+                "ID": "2",
+                "Platform": "Facebook",
+                "Channel id": "fb-1",
+                "Channel name": "Official One",
+                "Category": "Official",
+                "__category_id": "13",
+                "Post id": "fb-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Official #ob53",
+                "Link": "https://facebook.com/post/1",
+                "Publish time": "2026-04-18 11:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "5",
+                "Duration (second)": "20",
+                "Engagement": "40",
+                "Reaction": "20",
+                "View": "200000",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            report_data = build_hashtag_report_data(
+                db_path,
+                "hashtag ob53",
+                now=datetime.fromisoformat("2026-04-18T12:00:00"),
+            )
+
+            self.assertTrue(report_data["hasData"])
+            self.assertEqual(report_data["totalViews"], 700000)
+            self.assertEqual(report_data["totalClips"], 2)
+            self.assertEqual(len(report_data["dailyChart"]), 30)
+            self.assertEqual(report_data["dailyChart"][-2]["totalViews"], 500000)
+            self.assertEqual(report_data["dailyChart"][-1]["totalViews"], 200000)
+
+    def test_build_hashtag_report_data_uses_latest_data_day_when_store_lags(self):
+        rows = [
+            {
+                "ID": "1",
+                "Platform": "Tiktok",
+                "Channel id": "tt-1",
+                "Channel name": "KOL One",
+                "Category": "Gameplay Creator",
+                "__category_id": "14",
+                "Post id": "tt-post-1",
+                "Post type": "VIDEO",
+                "Post description": "Clip 1 #ob53",
+                "Link": "https://www.tiktok.com/@kol/video/1",
+                "Publish time": "2026-04-17 10:00:00",
+                "Hashtag": "#ob53",
+                "Comment": "10",
+                "Duration (second)": "30",
+                "Engagement": "120",
+                "Reaction": "90",
+                "View": "500000",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            csv_path = root / "master.csv"
+            db_path = root / "master.sqlite"
+            csv_path.write_bytes(export_rows_to_csv_bytes(rows))
+            build_store_from_export(csv_path, db_path, timezone_name="Asia/Ho_Chi_Minh")
+
+            report_data = build_hashtag_report_data(
+                db_path,
+                "hashtag ob53",
+                now=datetime.fromisoformat("2026-05-01T12:00:00"),
+            )
+
+            self.assertTrue(report_data["hasData"])
+            self.assertEqual(len(report_data["dailyChart"]), 30)
+            self.assertEqual(report_data["dailyChart"][-1]["date"], "2026-04-17")
+            self.assertEqual(report_data["dailyChart"][-1]["totalViews"], 500000)
 
     def test_format_kol_report_aggregates_channels_from_mapping(self):
         rows = [

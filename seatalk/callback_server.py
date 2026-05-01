@@ -19,7 +19,7 @@ import zipfile
 import requests
 
 from app.pipeline import build_report_package_by_code
-from app.charting import build_kol_channel_30d_chart
+from app.charting import build_hashtag_30d_chart, build_kol_channel_30d_chart
 from app.config_loader import load_json
 from app.data_chat import answer_data_question
 from app.health import (
@@ -31,7 +31,7 @@ from app.health import (
     format_scope_report,
     normalize_command_text,
 )
-from app.private_reports import build_kol_report_data, format_hashtag_report_v2, format_kol_report
+from app.private_reports import build_hashtag_report_data, build_kol_report_data, format_hashtag_report_v2, format_kol_report
 from datasocial.exceptions import DatasocialError
 from datasocial.presets import load_preset
 from datasocial.seatalk import SeaTalkError
@@ -822,9 +822,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
-                reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
+                self._send_thread_hashtag_report(group_client, message_text)
+                return
             elif command == "kol":
-                self._send_private_kol_report(private_client, message_text)
+                self._send_private_kol_report(group_client, message_text)
                 return
             elif command == "imagelink":
                 group_client.send_text("**Imagelink đang chạy**\n*Tôi đang tải ảnh lên web nội bộ, vui lòng chờ một chút...*")
@@ -1014,7 +1015,8 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                                 lines.append(f"  *{item['note']}*")
                 reply_text = "\n".join(lines)
             elif command == "hashtag":
-                reply_text = format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now())
+                self._send_thread_hashtag_report(private_client, message_text)
+                return
             elif command == "kol":
                 self._send_private_kol_report(private_client, message_text)
                 return
@@ -1346,6 +1348,52 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                         f"*Kênh đang chọn: {primary_channel.get('channelName') or '-'} ({primary_channel.get('platform') or '-'})*\n"
                         f"*Chi tiết: {type(exc).__name__}: {exc}*"
                     )
+
+        def _send_thread_hashtag_report(self, client: Any, message_text: str) -> None:
+            report_data = build_hashtag_report_data(
+                runtime["db_path"],
+                message_text,
+                now=datetime.now(),
+            )
+            client.send_text(format_hashtag_report_v2(runtime["db_path"], message_text, now=datetime.now()))
+            if report_data.get("error") or not report_data.get("hasData"):
+                return
+
+            query = str(report_data.get("query") or "").strip()
+            daily_chart = list(report_data.get("dailyChart") or [])
+            if not query or not daily_chart:
+                return
+            chart_path = build_hashtag_30d_chart(
+                hashtag=query,
+                daily_chart=daily_chart,
+            )
+            LOGGER.info(
+                "Hashtag chart prepared | hashtag=%s | chart_path=%s | chart_points=%s | total_views=%s | total_clips=%s",
+                query,
+                chart_path,
+                len(daily_chart),
+                report_data.get("totalViews", 0),
+                report_data.get("totalClips", 0),
+            )
+            try:
+                send_result = client.send_image_path(str(chart_path))
+                LOGGER.info(
+                    "Hashtag chart send success | hashtag=%s | result=%s",
+                    query,
+                    json.dumps(send_result, ensure_ascii=False, sort_keys=True),
+                )
+            except Exception as exc:
+                LOGGER.exception(
+                    "Hashtag chart send failed | hashtag=%s | error_type=%s | error=%s",
+                    query,
+                    type(exc).__name__,
+                    exc,
+                )
+                client.send_text(
+                    "**Biểu đồ hashtag chưa gửi được trong lần này**\n"
+                    f"*Hashtag đang chọn: #{query}*\n"
+                    f"*Chi tiết: {type(exc).__name__}: {exc}*"
+                )
 
         def _send_thread_report_with_optional_chart(self, client: Any, report_code: str) -> None:
             try:

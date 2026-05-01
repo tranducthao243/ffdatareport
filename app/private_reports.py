@@ -411,3 +411,52 @@ def format_hashtag_report_v2(db_path: Path, text: str, *, now: datetime | None =
         f"- Percentage: {official_share}%",
     ]
     return "\n".join(lines)
+
+
+def build_hashtag_report_data(db_path: Path, text: str, *, now: datetime | None = None) -> dict[str, Any]:
+    query = extract_hashtag_query(text)
+    if not query:
+        return {"error": "Hashtag: -\nVui lòng dùng cú pháp: `hashtag ob53` hoặc `hashtagob53`."}
+
+    posts = load_posts(db_path)
+    matched = [
+        post
+        for post in posts
+        if post.category_id in HASHTAG_PRIVATE_CATEGORY_IDS
+        and query in {tag.lstrip("#").lower() for tag in post.hashtags}
+    ]
+    if not matched:
+        return {
+            "query": query,
+            "dailyChart": [],
+            "totalViews": 0,
+            "totalClips": 0,
+            "hasData": False,
+        }
+
+    _default_start_date, default_end_date = _recent_window(30, now=now)
+    max_data_date = max(post.published_date for post in matched)
+    end_date = min(default_end_date, max_data_date) if max_data_date < default_end_date else default_end_date
+    start_date = end_date - timedelta(days=29)
+    scoped = [post for post in matched if start_date <= post.published_date <= end_date]
+    daily_views: dict[str, int] = {}
+    for post in scoped:
+        day_iso = post.published_date.isoformat()
+        daily_views[day_iso] = int(daily_views.get(day_iso, 0)) + post.view
+
+    daily_chart = [
+        {
+            "date": current_day.isoformat(),
+            "totalViews": int(daily_views.get(current_day.isoformat(), 0)),
+        }
+        for current_day in (
+            start_date + timedelta(days=offset) for offset in range((end_date - start_date).days + 1)
+        )
+    ]
+    return {
+        "query": query,
+        "dailyChart": daily_chart,
+        "totalViews": sum(post.view for post in scoped),
+        "totalClips": len(scoped),
+        "hasData": bool(scoped),
+    }
