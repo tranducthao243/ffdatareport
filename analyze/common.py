@@ -10,7 +10,7 @@ from datasocial.exceptions import DatasocialError
 from datasocial.timewindows import DEFAULT_REPORT_TZ, build_date_window, get_report_timezone
 
 
-KOL_WHITELIST = {"freefire", "nhasangtaofreefire", "ff", "garena"}
+KOL_WHITELIST = {"freefire", "nhasangtaofreefire", "ff", "garena", "themtranfreefire", "sangtaofreefire"}
 KOL_PLATFORMS = ("tiktok", "youtube")
 OFFICIAL_PLATFORMS = ("tiktok", "youtube", "facebook")
 KOL_CATEGORY_IDS = {14, 22, 23, 24}
