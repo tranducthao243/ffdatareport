@@ -515,7 +515,25 @@ def start_workflow_monitor(runtime: dict[str, Any], *, workflow_file: str, start
 def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
     private_message_lock = threading.Lock()
     handled_private_message_ids: dict[str, str] = {}
+    handled_callback_message_ids: dict[str, float] = {}
     active_uploads: set[tuple[str, str]] = set()
+
+    def _claim_callback_message(message_id: str) -> bool:
+        if not message_id:
+            return True
+        now_ts = time.time()
+        with private_message_lock:
+            expired = [
+                key
+                for key, seen_at in handled_callback_message_ids.items()
+                if now_ts - seen_at > 600
+            ]
+            for key in expired:
+                handled_callback_message_ids.pop(key, None)
+            if message_id in handled_callback_message_ids:
+                return False
+            handled_callback_message_ids[message_id] = now_ts
+        return True
 
     class CallbackHandler(BaseHTTPRequestHandler):
         server_version = "SeatalkCallbackServer/1.0"
@@ -770,6 +788,16 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            message_id = callback_context.get("message_id", "")
+            if message_id and not _claim_callback_message(message_id):
+                LOGGER.info(
+                    "Skipping duplicate group callback | group_id=%s | employee_code=%s | message_id=%s",
+                    callback_context.get("group_id") or "-",
+                    callback_context.get("employee_code") or "-",
+                    message_id,
+                )
+                return
+
             message_text = callback_context.get("message_text", "")
 
             if callback_context.get("message_tag") == "image":
@@ -911,6 +939,15 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            message_id = callback_context.get("message_id", "")
+            if message_id and not _claim_callback_message(message_id):
+                LOGGER.info(
+                    "Skipping duplicate private callback | employee_code=%s | message_id=%s",
+                    employee_code,
+                    message_id,
+                )
+                return
+
             if callback_context.get("message_tag") == "image":
                 self._handle_private_image_message(callback_context)
                 return
@@ -919,7 +956,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             normalized_message_text = normalize_command_text(message_text)
             command = classify_private_command(message_text)
             is_menu_shortcut = normalized_message_text == "."
-            message_id = callback_context.get("message_id", "")
             if command in {"imagelink", "removebg"} and message_id:
                 with private_message_lock:
                     if message_id in handled_private_message_ids:
