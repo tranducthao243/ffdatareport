@@ -20,7 +20,13 @@ from seatalk.callbacks import (
     parse_click_payload,
 )
 from seatalk.callback_server import build_runtime
-from seatalk.group_thread_service import is_allowed_ctv_group, split_csv_env
+from seatalk.group_thread_service import (
+    derive_group_thread_id,
+    is_allowed_ctv_group,
+    message_addresses_bot,
+    split_csv_env,
+    strip_group_bot_aliases,
+)
 from seatalk.private_bot_service import build_private_help_text, build_private_usage_text
 from seatalk.interactive import build_interactive_actions, build_interactive_groups
 from seatalk.payloads import build_interactive_group_payload, build_interactive_payload, build_report_interactive_payload
@@ -54,6 +60,16 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(split_csv_env("group-1, group-2"), ["group-1", "group-2"])
         self.assertTrue(is_allowed_ctv_group(runtime, {"group_id": "group-1"}))
         self.assertFalse(is_allowed_ctv_group(runtime, {"group_id": "group-x"}))
+
+    def test_group_thread_helpers_follow_seatalk_rules(self):
+        context_with_thread = {"thread_id": "thread-1", "message_id": "message-1"}
+        context_without_thread = {"thread_id": "", "message_id": "message-2"}
+        aliases = ["bot data kols", "bot"]
+
+        self.assertEqual(derive_group_thread_id(context_with_thread), "thread-1")
+        self.assertEqual(derive_group_thread_id(context_without_thread), "message-2")
+        self.assertTrue(message_addresses_bot("@Bot Data KOLs chart", aliases))
+        self.assertEqual(strip_group_bot_aliases("@Bot Data KOLs chart", aliases), "chart")
 
     def test_hashtag_command_is_detected_with_and_without_space(self):
         self.assertEqual(classify_private_command("hashtag ob53"), "hashtag")
@@ -863,8 +879,9 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
         _, kwargs = client.session.post.call_args
         self.assertEqual(kwargs["json"]["group_id"], "group-1")
-        self.assertEqual(kwargs["json"]["thread_id"], "thread-1")
-        self.assertEqual(kwargs["json"]["quoted_message_id"], "message-1")
+        self.assertEqual(kwargs["json"]["message"]["thread_id"], "thread-1")
+        self.assertNotIn("thread_id", kwargs["json"])
+        self.assertNotIn("quoted_message_id", kwargs["json"])
 
     def test_group_typing_includes_thread_id_when_present(self):
         client = SeaTalkClient(

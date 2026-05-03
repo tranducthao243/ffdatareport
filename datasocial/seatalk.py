@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from .exceptions import DatasocialError
 
 
 SEATALK_OPENAPI_BASE = "https://openapi.seatalk.io"
+LOGGER = logging.getLogger("datasocial.seatalk")
 
 
 class SeaTalkError(DatasocialError):
@@ -130,14 +132,12 @@ class SeaTalkClient:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-        message_payload = {"message": message}
+        message_payload = {"message": dict(message)}
 
         if self.settings.group_id:
-            payload = {"group_id": self.settings.group_id, **message_payload}
             if self.settings.thread_id:
-                payload["thread_id"] = self.settings.thread_id
-            if self.settings.quoted_message_id:
-                payload["quoted_message_id"] = self.settings.quoted_message_id
+                message_payload["message"]["thread_id"] = self.settings.thread_id
+            payload = {"group_id": self.settings.group_id, **message_payload}
             url = f"{SEATALK_OPENAPI_BASE}/messaging/v2/group_chat"
         elif self.settings.employee_code:
             payload = {
@@ -153,12 +153,22 @@ class SeaTalkClient:
         else:
             raise SeaTalkError("SeaTalk target missing. Set group_id or employee_code.")
 
+        LOGGER.info(
+            "SeaTalk outbound payload | target=%s | payload=%s",
+            self.settings.group_id or self.settings.employee_code or "-",
+            payload,
+        )
         response = self.session.post(url, headers=headers, json=payload, timeout=30)
         if not response.ok:
             raise SeaTalkError(
                 f"SeaTalk send failed with HTTP {response.status_code}: {response.text[:500]}"
             )
         data = response.json()
+        LOGGER.info(
+            "SeaTalk outbound response | target=%s | response=%s",
+            self.settings.group_id or self.settings.employee_code or "-",
+            data,
+        )
         if data.get("code") not in (0, "0", None):
             raise SeaTalkError(f"SeaTalk send returned non-zero code: {data}")
         return data

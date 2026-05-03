@@ -39,7 +39,13 @@ from datasocial.seatalk import SeaTalkError
 from .auth import build_seatalk_client
 from .identity import build_unified_user, get_superadmins, load_env_role_directory, load_user_directory
 from .alerts import send_superadmin_alerts
-from .group_thread_service import is_allowed_ctv_group as service_is_allowed_ctv_group, split_csv_env
+from .group_thread_service import (
+    derive_group_thread_id,
+    is_allowed_ctv_group as service_is_allowed_ctv_group,
+    message_addresses_bot as service_message_addresses_bot,
+    split_csv_env,
+    strip_group_bot_aliases as service_strip_group_bot_aliases,
+)
 from .interactive import build_interactive_actions, build_interactive_groups, build_superadmin_control_payload
 from .payloads import build_interactive_group_payload
 from .private_bot_service import (
@@ -324,6 +330,20 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "superadmin_users": superadmin_users,
         "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
         "ctv_group_ids": split_csv_env(os.getenv("SEATALK_CTV_GROUP_IDS", "")),
+        "group_bot_aliases": [
+            alias
+            for alias in (
+                _normalize_alias(item)
+                for item in split_csv_env(
+                    os.getenv("SEATALK_GROUP_BOT_ALIASES", ""),
+                    "Bot Data KOLs",
+                    "@Bot Data KOLs",
+                    "bot data kols",
+                    "@bot data kols",
+                )
+            )
+            if alias
+        ],
     }
 
 
@@ -516,6 +536,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
     private_message_lock = threading.Lock()
     handled_private_message_ids: dict[str, str] = {}
     handled_callback_message_ids: dict[str, float] = {}
+    group_thread_contexts: dict[tuple[str, str], dict[str, Any]] = {}
     active_uploads: set[tuple[str, str]] = set()
 
     def _claim_callback_message(message_id: str) -> bool:
@@ -534,6 +555,56 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 return False
             handled_callback_message_ids[message_id] = now_ts
         return True
+
+    def _group_actor_key(callback_context: dict[str, str]) -> tuple[str, str]:
+        group_id = str(callback_context.get("group_id") or "").strip()
+        actor = (
+            str(callback_context.get("seatalk_id") or "").strip()
+            or str(callback_context.get("employee_code") or "").strip()
+            or str(callback_context.get("email") or "").strip()
+        )
+        return group_id, actor
+
+    def _remember_group_thread_context(callback_context: dict[str, str]) -> None:
+        key = _group_actor_key(callback_context)
+        if not key[0] or not key[1]:
+            return
+        now_ts = time.time()
+        with private_message_lock:
+            expired = [
+                item_key
+                for item_key, payload in group_thread_contexts.items()
+                if now_ts - float(payload.get("seen_at") or 0) > 7200
+            ]
+            for item_key in expired:
+                group_thread_contexts.pop(item_key, None)
+            group_thread_contexts[key] = {
+                "group_id": key[0],
+                "thread_id": derive_group_thread_id(callback_context),
+                "source_message_id": str(callback_context.get("message_id") or "").strip(),
+                "seen_at": now_ts,
+            }
+
+    def _lookup_group_thread_context(callback_context: dict[str, str]) -> dict[str, str]:
+        direct_thread_id = str(callback_context.get("thread_id") or "").strip()
+        if direct_thread_id and not direct_thread_id.endswith(":action"):
+            return {
+                "group_id": str(callback_context.get("group_id") or "").strip(),
+                "thread_id": direct_thread_id,
+                "source_message_id": str(callback_context.get("message_id") or "").strip(),
+            }
+        key = _group_actor_key(callback_context)
+        if not key[0] or not key[1]:
+            return {}
+        with private_message_lock:
+            payload = dict(group_thread_contexts.get(key) or {})
+        if not payload:
+            return {}
+        return {
+            "group_id": str(payload.get("group_id") or key[0]).strip(),
+            "thread_id": str(payload.get("thread_id") or "").strip(),
+            "source_message_id": str(payload.get("source_message_id") or "").strip(),
+        }
 
     class CallbackHandler(BaseHTTPRequestHandler):
         server_version = "SeatalkCallbackServer/1.0"
@@ -575,10 +646,12 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     "message_from_bot_subscriber",
                     "message_received_from_bot_user",
                     "message_from_user",
+                    "new_mentioned_message_received_from_group_chat",
+                    "new_message_received_from_thread",
                 }:
                     callback_context = build_callback_context(event)
                     if callback_context.get("group_id"):
-                        self._handle_group_message(event)
+                        self._handle_group_message(event, event_type)
                     else:
                         self._handle_private_message(event)
                     self._write_json(HTTPStatus.OK, {"code": 0})
@@ -643,8 +716,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 app_id=runtime["seatalk_app_id"],
                 app_secret=runtime["seatalk_app_secret"],
                 group_id=callback_context.get("group_id", ""),
-                thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
-                quoted_message_id=callback_context.get("message_id", ""),
+                thread_id=derive_group_thread_id(callback_context),
             )
 
         def _build_health_snapshot(self) -> dict[str, Any]:
@@ -674,10 +746,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             employee_code = callback_context["employee_code"]
             group_id = callback_context["group_id"]
-            thread_id = callback_context["thread_id"] or callback_context["message_id"]
-            quoted_message_id = callback_context["message_id"] or callback_context["quoted_message_id"]
-            if not employee_code:
-                raise SeatalkCallbackError("Missing employee_code in callback event.")
             if not runtime["seatalk_app_id"] or not runtime["seatalk_app_secret"]:
                 raise SeatalkCallbackError(
                     "SEATALK_APP_ID and SEATALK_APP_SECRET are required before callback replies can be sent."
@@ -688,13 +756,29 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             if action not in {"open_report", "reply_text", "trigger_workflow"}:
                 raise SeatalkCallbackError(f"Unsupported interactive action: {action or '-'}")
 
-            private_client = build_seatalk_client(
-                app_id=runtime["seatalk_app_id"],
-                app_secret=runtime["seatalk_app_secret"],
-                employee_code=employee_code,
-                thread_id=thread_id,
-            )
-            if not service_is_authorized_private_sender(runtime, callback_context):
+            is_allowed_group_thread = bool(group_id and service_is_allowed_ctv_group(runtime, callback_context))
+            thread_context = _lookup_group_thread_context(callback_context) if is_allowed_group_thread else {}
+            group_thread_client = None
+            private_client = None
+            if is_allowed_group_thread and thread_context.get("thread_id"):
+                group_thread_client = build_seatalk_client(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    group_id=thread_context.get("group_id", group_id),
+                    thread_id=thread_context.get("thread_id", ""),
+                )
+            elif employee_code:
+                private_client = build_seatalk_client(
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    employee_code=employee_code,
+                    thread_id=callback_context["thread_id"] or callback_context["message_id"],
+                )
+            else:
+                raise SeatalkCallbackError("Missing group thread context and employee_code in callback event.")
+
+            if not group_thread_client and not service_is_authorized_private_sender(runtime, callback_context):
+                assert private_client is not None
                 private_client.send_text(
                     service_format_private_access_denied(
                         callback_context,
@@ -709,35 +793,32 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
+            delivery_client = group_thread_client or private_client
+            assert delivery_client is not None
+
             target_report_code = str(click_payload.get("target_report_code") or "").strip()
             if action == "open_report" and not target_report_code:
                 raise SeatalkCallbackError("Missing target_report_code in callback payload.")
             try:
-                typing_client = build_seatalk_client(
-                    app_id=runtime["seatalk_app_id"],
-                    app_secret=runtime["seatalk_app_secret"],
-                    employee_code=employee_code,
-                    thread_id=thread_id,
-                )
-                typing_client.set_typing_status()
+                delivery_client.set_typing_status()
                 LOGGER.info(
                     "Seatalk typing status sent | employee_code=%s | group_id=%s | thread_id=%s",
                     employee_code or "-",
-                    group_id or "-",
-                    thread_id or "-",
+                    group_id or thread_context.get("group_id", "-"),
+                    thread_context.get("thread_id", callback_context["thread_id"] or callback_context["message_id"]) or "-",
                 )
             except Exception:
                 LOGGER.exception(
                     "Seatalk typing status failed | employee_code=%s | group_id=%s | thread_id=%s",
                     employee_code or "-",
-                    group_id or "-",
-                    thread_id or "-",
+                    group_id or thread_context.get("group_id", "-"),
+                    thread_context.get("thread_id", callback_context["thread_id"] or callback_context["message_id"]) or "-",
                 )
             self._sync_store_if_needed("interactive_click")
 
             if action == "trigger_workflow":
                 if unified_user.get("role") != "superadmin":
-                    private_client.send_text("**Bạn không có quyền dùng Điều Khiển Trung Tâm.**")
+                    delivery_client.send_text("**Bạn không có quyền dùng Điều Khiển Trung Tâm.**")
                     return
                 workflow_file = str(click_payload.get("workflow") or "").strip()
                 if workflow_file not in WORKFLOW_NAME_MAP:
@@ -747,12 +828,12 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     started_after = datetime.utcnow()
                     trigger_github_workflow(runtime, workflow_file=workflow_file, inputs=inputs)
                     start_workflow_monitor(runtime, workflow_file=workflow_file, started_after=started_after)
-                    private_client.send_text(
+                    delivery_client.send_text(
                         f"**Đã kích hoạt {WORKFLOW_NAME_MAP[workflow_file]}**\n"
                         "*Khi workflow chạy xong, tôi sẽ gửi thông báo kết quả về cho superadmin.*"
                     )
                 except Exception as exc:
-                    private_client.send_text(
+                    delivery_client.send_text(
                         f"**Kích hoạt workflow thất bại**\n*Chi tiết: {type(exc).__name__}: {exc}*"
                     )
             elif action == "reply_text":
@@ -765,16 +846,17 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                             "*Tôi sẽ mở nội dung này ngay khi dữ liệu sẵn sàng.*"
                         ),
                     )
-                private_client.send_text(message_text)
+                delivery_client.send_text(message_text)
             else:
-                self._send_private_report_with_optional_chart(private_client, target_report_code)
+                self._send_thread_report_with_optional_chart(delivery_client, target_report_code)
             LOGGER.info(
-                "Seatalk callback reply sent as private message | employee_code=%s | from_group=%s",
-                employee_code,
-                group_id or "-",
+                "Seatalk interactive reply sent | mode=%s | employee_code=%s | group_id=%s",
+                "group_thread" if group_thread_client else "private",
+                employee_code or "-",
+                group_id or thread_context.get("group_id", "-"),
             )
 
-        def _handle_group_message(self, event: dict[str, Any]) -> None:
+        def _handle_group_message(self, event: dict[str, Any], event_type: str) -> None:
             callback_context = build_callback_context(event)
             LOGGER.info(
                 "Seatalk group message context | %s",
@@ -798,13 +880,39 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 )
                 return
 
-            message_text = callback_context.get("message_text", "")
+            inbound_thread_id = str(callback_context.get("thread_id") or "").strip()
+            inbound_message_id = str(callback_context.get("message_id") or "").strip()
+            raw_message_text = callback_context.get("message_text", "")
+            is_mentioned_message = event_type == "new_mentioned_message_received_from_group_chat"
+
+            if inbound_thread_id:
+                message_text = raw_message_text
+            else:
+                if not (is_mentioned_message or service_message_addresses_bot(raw_message_text, runtime.get("group_bot_aliases") or [])):
+                    LOGGER.info(
+                        "Ignoring top-level group message without bot mention | group_id=%s | message_id=%s",
+                        callback_context.get("group_id") or "-",
+                        inbound_message_id or "-",
+                    )
+                    return
+                message_text = (
+                    service_strip_group_bot_aliases(raw_message_text, runtime.get("group_bot_aliases") or [])
+                    or raw_message_text
+                )
+            callback_context = {**callback_context, "message_text": message_text}
+            _remember_group_thread_context(callback_context)
+            LOGGER.info(
+                "Seatalk group thread derived | event_type=%s | inbound_message_id=%s | inbound_thread_id=%s | outbound_thread_id=%s",
+                event_type,
+                inbound_message_id or "-",
+                inbound_thread_id or "-",
+                derive_group_thread_id(callback_context) or "-",
+            )
 
             if callback_context.get("message_tag") == "image":
                 self._handle_group_image_message(callback_context)
                 return
 
-            callback_context = {**callback_context, "message_text": message_text}
             command = classify_private_command(message_text)
             is_menu_shortcut = normalize_command_text(message_text) == "."
 
