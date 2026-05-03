@@ -43,6 +43,7 @@ from .group_thread_service import (
     derive_group_thread_id,
     is_allowed_ctv_group as service_is_allowed_ctv_group,
     message_addresses_bot as service_message_addresses_bot,
+    normalize_group_thread_command_text as service_normalize_group_thread_command_text,
     split_csv_env,
     strip_group_bot_aliases as service_strip_group_bot_aliases,
 )
@@ -887,21 +888,19 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             inbound_message_id = str(callback_context.get("message_id") or "").strip()
             raw_message_text = callback_context.get("message_text", "")
             is_mentioned_message = event_type == "new_mentioned_message_received_from_group_chat"
+            aliases = runtime.get("group_bot_aliases") or []
 
             if inbound_thread_id:
-                message_text = raw_message_text
+                message_text = service_normalize_group_thread_command_text(raw_message_text, aliases) or raw_message_text
             else:
-                if not (is_mentioned_message or service_message_addresses_bot(raw_message_text, runtime.get("group_bot_aliases") or [])):
+                if not (is_mentioned_message or service_message_addresses_bot(raw_message_text, aliases)):
                     LOGGER.info(
                         "Ignoring top-level group message without bot mention | group_id=%s | message_id=%s",
                         callback_context.get("group_id") or "-",
                         inbound_message_id or "-",
                     )
                     return
-                message_text = (
-                    service_strip_group_bot_aliases(raw_message_text, runtime.get("group_bot_aliases") or [])
-                    or raw_message_text
-                )
+                message_text = service_normalize_group_thread_command_text(raw_message_text, aliases) or raw_message_text
             callback_context = {**callback_context, "message_text": message_text}
             _remember_group_thread_context(callback_context)
             LOGGER.info(
@@ -917,6 +916,13 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 return
 
             command = classify_private_command(message_text)
+            LOGGER.info(
+                "Seatalk group command normalized | group_id=%s | raw_message_text=%s | message_text=%s | command=%s",
+                callback_context.get("group_id") or "-",
+                raw_message_text,
+                message_text,
+                command,
+            )
             is_menu_shortcut = normalize_command_text(message_text) == "."
 
             group_client = self._build_group_client(callback_context)

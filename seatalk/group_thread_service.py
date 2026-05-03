@@ -44,3 +44,11 @@ def strip_group_bot_aliases(message_text: str, aliases: list[str]) -> str:
                 cleaned = cleaned.replace(alias.lstrip("@"), " ")
     cleaned = cleaned.replace("@", " ")
     return " ".join(cleaned.split()).strip()
+
+
+def normalize_group_thread_command_text(message_text: str, aliases: list[str]) -> str:
+    cleaned = strip_group_bot_aliases(message_text, aliases) or normalize_command_text(message_text)
+    cleaned = str(cleaned or "").strip()
+    while cleaned.startswith("@"):
+        cleaned = cleaned[1:].strip()
+    return " ".join(cleaned.split()).strip()

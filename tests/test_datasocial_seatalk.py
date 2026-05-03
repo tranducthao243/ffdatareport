@@ -24,6 +24,7 @@ from seatalk.group_thread_service import (
     derive_group_thread_id,
     is_allowed_ctv_group,
     message_addresses_bot,
+    normalize_group_thread_command_text,
     split_csv_env,
     strip_group_bot_aliases,
 )
@@ -70,6 +71,11 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(derive_group_thread_id(context_without_thread), "message-2")
         self.assertTrue(message_addresses_bot("@Bot Data KOLs chart", aliases))
         self.assertEqual(strip_group_bot_aliases("@Bot Data KOLs chart", aliases), "chart")
+        self.assertEqual(normalize_group_thread_command_text("@campaign", aliases), "campaign")
+        self.assertEqual(
+            normalize_group_thread_command_text("@Bot Data KOLs campaign", aliases),
+            "campaign",
+        )
 
     def test_hashtag_command_is_detected_with_and_without_space(self):
         self.assertEqual(classify_private_command("hashtag ob53"), "hashtag")
