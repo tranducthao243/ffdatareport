@@ -70,8 +70,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(derive_group_thread_id(context_with_thread), "thread-1")
         self.assertEqual(derive_group_thread_id(context_without_thread), "message-2")
         self.assertTrue(message_addresses_bot("@Bot Data KOLs chart", aliases))
+        self.assertFalse(message_addresses_bot("@campaign", aliases))
         self.assertEqual(strip_group_bot_aliases("@Bot Data KOLs chart", aliases), "chart")
-        self.assertEqual(normalize_group_thread_command_text("@campaign", aliases), "campaign")
         self.assertEqual(
             normalize_group_thread_command_text("@Bot Data KOLs campaign", aliases),
             "campaign",

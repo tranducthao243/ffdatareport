@@ -890,17 +890,17 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             is_mentioned_message = event_type == "new_mentioned_message_received_from_group_chat"
             aliases = runtime.get("group_bot_aliases") or []
 
-            if inbound_thread_id:
-                message_text = service_normalize_group_thread_command_text(raw_message_text, aliases) or raw_message_text
-            else:
-                if not (is_mentioned_message or service_message_addresses_bot(raw_message_text, aliases)):
-                    LOGGER.info(
-                        "Ignoring top-level group message without bot mention | group_id=%s | message_id=%s",
-                        callback_context.get("group_id") or "-",
-                        inbound_message_id or "-",
-                    )
-                    return
-                message_text = service_normalize_group_thread_command_text(raw_message_text, aliases) or raw_message_text
+            if not service_message_addresses_bot(raw_message_text, aliases):
+                LOGGER.info(
+                    "Ignoring group message without explicit bot mention | group_id=%s | message_id=%s | thread_id=%s | event_type=%s",
+                    callback_context.get("group_id") or "-",
+                    inbound_message_id or "-",
+                    inbound_thread_id or "-",
+                    event_type,
+                )
+                return
+
+            message_text = service_normalize_group_thread_command_text(raw_message_text, aliases) or raw_message_text
             callback_context = {**callback_context, "message_text": message_text}
             _remember_group_thread_context(callback_context)
             LOGGER.info(
