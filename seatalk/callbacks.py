@@ -24,6 +24,7 @@ def extract_sender_employee_code(event: dict[str, Any]) -> str:
     return _first_non_empty(
         event.get("employee_code"),
         event.get("sender", {}).get("employee_code"),
+        event.get("message", {}).get("sender", {}).get("employee_code"),
         event.get("operator", {}).get("employee_code"),
         event.get("employee", {}).get("employee_code"),
     )
@@ -33,6 +34,7 @@ def extract_sender_email(event: dict[str, Any]) -> str:
     return _first_non_empty(
         event.get("email"),
         event.get("sender", {}).get("email"),
+        event.get("message", {}).get("sender", {}).get("email"),
         event.get("operator", {}).get("email"),
         event.get("employee", {}).get("email"),
     )
@@ -43,6 +45,8 @@ def extract_sender_seatalk_id(event: dict[str, Any]) -> str:
         event.get("seatalk_id"),
         event.get("sender", {}).get("seatalk_id"),
         event.get("sender", {}).get("id"),
+        event.get("message", {}).get("sender", {}).get("seatalk_id"),
+        event.get("message", {}).get("sender", {}).get("id"),
         event.get("operator", {}).get("seatalk_id"),
         event.get("employee", {}).get("seatalk_id"),
     )

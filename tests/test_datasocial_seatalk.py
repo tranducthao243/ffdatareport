@@ -641,6 +641,27 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertEqual(context["email"], "tester@example.com")
         self.assertEqual(context["seatalk_id"], "seatalk-1")
 
+    def test_build_callback_context_reads_group_sender_inside_message(self):
+        event = {
+            "group_id": "group-1",
+            "message": {
+                "message_id": "message-1",
+                "thread_id": "",
+                "sender": {
+                    "employee_code": "emp-2",
+                    "email": "group@example.com",
+                    "seatalk_id": "seatalk-2",
+                },
+                "text": {"plain_text": "@Bot Data KOLs chart"},
+            },
+        }
+
+        context = build_callback_context(event)
+
+        self.assertEqual(context["employee_code"], "emp-2")
+        self.assertEqual(context["email"], "group@example.com")
+        self.assertEqual(context["seatalk_id"], "seatalk-2")
+
     def test_extract_message_text_reads_private_message_plain_text(self):
         event = {"message": {"text": {"plain_text": "health"}}}
 
@@ -858,6 +879,35 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         self.assertTrue(any(item.role == "admin" and item.employee_code == "e_1" for item in env_roles))
         self.assertTrue(any(item.role == "admin" and item.email == "a@example.com" for item in env_roles))
         self.assertTrue(any(item.role == "admin" and item.seatalk_user_id == "1001" for item in env_roles))
+
+    def test_callback_server_build_runtime_includes_ctv_kol_group_in_allowlist(self):
+        class Args:
+            db_path = "outputs/ffvn_master.sqlite"
+            groups_config = "config/groups.json"
+            reports_config = "config/reports.json"
+            campaigns_config = "config/campaigns.json"
+            preset = "ffvn_master_daily"
+            report_mode = "today_so_far"
+            report_timezone = "Asia/Ho_Chi_Minh"
+            repo = "tranducthao243/ffdatareport"
+            artifact_name = "ffvn-daily-fetch-latest"
+            artifact_token = ""
+            sync_on_start = False
+            sync_on_click = False
+            verify_signature = False
+            signing_secret = ""
+
+        with patch.dict(
+            "os.environ",
+            {
+                "SEATALK_CTV_GROUP_IDS": "group-1,group-2",
+                "SEATALK_CTV_KOL_GROUP_ID": "group-3",
+            },
+            clear=False,
+        ):
+            runtime = build_runtime(Args())
+
+        self.assertEqual(runtime["ctv_group_ids"], ["group-1", "group-2", "group-3"])
 
     def test_group_send_includes_thread_fields_when_present(self):
         client = SeaTalkClient(

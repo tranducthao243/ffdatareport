@@ -329,7 +329,10 @@ def build_runtime(args: argparse.Namespace) -> dict[str, Any]:
         "env_role_directory": env_role_directory,
         "superadmin_users": superadmin_users,
         "kol_mapping_path": Path(os.getenv("SEATALK_KOL_MAPPING_PATH", "config/kol_channels.json")),
-        "ctv_group_ids": split_csv_env(os.getenv("SEATALK_CTV_GROUP_IDS", "")),
+        "ctv_group_ids": split_csv_env(
+            os.getenv("SEATALK_CTV_GROUP_IDS", ""),
+            os.getenv("SEATALK_CTV_KOL_GROUP_ID", ""),
+        ),
         "group_bot_aliases": [
             alias
             for alias in (
