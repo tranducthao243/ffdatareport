@@ -900,8 +900,28 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             inbound_thread_id = str(callback_context.get("thread_id") or "").strip()
             inbound_message_id = str(callback_context.get("message_id") or "").strip()
             raw_message_text = callback_context.get("message_text", "")
+            message_tag = str(callback_context.get("message_tag") or "").strip().lower()
             is_mentioned_message = event_type == "new_mentioned_message_received_from_group_chat"
             aliases = runtime.get("group_bot_aliases") or []
+
+            if message_tag == "image":
+                if not inbound_thread_id:
+                    LOGGER.info(
+                        "Ignoring top-level group image without thread context | group_id=%s | message_id=%s",
+                        callback_context.get("group_id") or "-",
+                        inbound_message_id or "-",
+                    )
+                    return
+                _remember_group_thread_context(callback_context)
+                LOGGER.info(
+                    "Seatalk group thread image accepted | event_type=%s | inbound_message_id=%s | inbound_thread_id=%s | outbound_thread_id=%s",
+                    event_type,
+                    inbound_message_id or "-",
+                    inbound_thread_id or "-",
+                    derive_group_thread_id(callback_context) or "-",
+                )
+                self._handle_group_image_message(callback_context)
+                return
 
             if not service_message_addresses_bot(raw_message_text, aliases):
                 LOGGER.info(
@@ -923,10 +943,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 inbound_thread_id or "-",
                 derive_group_thread_id(callback_context) or "-",
             )
-
-            if callback_context.get("message_tag") == "image":
-                self._handle_group_image_message(callback_context)
-                return
 
             command = classify_private_command(message_text)
             LOGGER.info(
