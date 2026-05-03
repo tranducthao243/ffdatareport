@@ -15,6 +15,13 @@
       "group_id_env": "SEATALK_KOL_GROUP_ID"
     },
     {
+      "name": "ffvn_ctv_kol_group",
+      "enabled": true,
+      "report_code": "SO2",
+      "title": "Báo cáo tự động KOL Free Fire",
+      "group_id_env": "SEATALK_CTV_KOL_GROUP_ID"
+    },
+    {
       "name": "ffvn_campaign_daily",
       "enabled": true,
       "send_enabled": false,
