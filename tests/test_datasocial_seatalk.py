@@ -693,6 +693,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             store_latest_image_for_user(
                 store_path,
+                user_key="private:110677",
                 employee_code="110677",
                 seatalk_id="9306358918",
                 message_id="m1",
@@ -701,6 +702,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             )
             store_latest_image_for_user(
                 store_path,
+                user_key="private:110677",
                 employee_code="110677",
                 seatalk_id="9306358918",
                 message_id="m2",
@@ -710,7 +712,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             latest = get_latest_unprocessed_image_for_user(
                 store_path,
-                employee_code="110677",
+                user_key="private:110677",
                 command_name="uploadimage",
             )
 
@@ -720,21 +722,21 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             mark_image_processed_for_user(
                 store_path,
-                employee_code="110677",
+                user_key="private:110677",
                 message_id="m2",
                 command_name="uploadimage",
             )
             self.assertIsNone(
                 get_latest_unprocessed_image_for_user(
                     store_path,
-                    employee_code="110677",
+                    user_key="private:110677",
                     command_name="uploadimage",
                 )
             )
             self.assertIsNotNone(
                 get_latest_unprocessed_image_for_user(
                     store_path,
-                    employee_code="110677",
+                    user_key="private:110677",
                     command_name="removebg",
                 )
             )
@@ -745,6 +747,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             store_latest_image_for_user(
                 store_path,
+                user_key="private:110677",
                 employee_code="110677",
                 seatalk_id="9306358918",
                 message_id="old-msg",
@@ -753,6 +756,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
             )
             store_latest_image_for_user(
                 store_path,
+                user_key="private:110677",
                 employee_code="110677",
                 seatalk_id="9306358918",
                 message_id="new-msg",
@@ -762,18 +766,42 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
 
             mark_image_processed_for_user(
                 store_path,
-                employee_code="110677",
+                user_key="private:110677",
                 message_id="old-msg",
                 command_name="uploadimage",
             )
 
             latest = get_latest_unprocessed_image_for_user(
                 store_path,
-                employee_code="110677",
+                user_key="private:110677",
                 command_name="uploadimage",
             )
             self.assertIsNotNone(latest)
             self.assertEqual(latest["message_id"], "new-msg")
+
+    def test_group_image_store_can_use_group_actor_key_without_employee_code(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store_path = Path(tmp) / "seatalk_images.json"
+
+            store_latest_image_for_user(
+                store_path,
+                user_key="group:group-1:actor:seatalk-1",
+                employee_code="",
+                seatalk_id="seatalk-1",
+                message_id="group-msg-1",
+                image_url="https://openapi.seatalk.io/messaging/v2/file/group-msg-1",
+                thread_id="thread-1",
+            )
+
+            latest = get_latest_unprocessed_image_for_user(
+                store_path,
+                user_key="group:group-1:actor:seatalk-1",
+                command_name="uploadimage",
+            )
+
+            self.assertIsNotNone(latest)
+            self.assertEqual(latest["seatalk_id"], "seatalk-1")
+            self.assertEqual(latest["message_id"], "group-msg-1")
 
     def test_uploadimage_filename_tokens_use_unique_hash_suffix(self):
         stem_one = _safe_filename_stem("u7YirumAclDz6kjP41NhyMkXvXNAhNTqCAnQvTUQ9YuCzzoUoFE7bJ5O")

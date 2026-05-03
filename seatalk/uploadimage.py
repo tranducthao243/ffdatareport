@@ -76,6 +76,7 @@ def _normalize_processed_commands(entry: dict[str, Any]) -> list[str]:
 def store_latest_image_for_user(
     store_path: Path,
     *,
+    user_key: str,
     employee_code: str,
     seatalk_id: str,
     message_id: str,
@@ -93,11 +94,13 @@ def store_latest_image_for_user(
         "processed": False,
         "processed_commands": [],
     }
-    payload.setdefault("users", {})[employee_code] = entry
+    payload.setdefault("users", {})[user_key] = entry
     _save_store(store_path, payload)
     LOGGER.info(
-        "Seatalk image stored | employee_code=%s | message_id=%s | image_url=%s",
-        employee_code,
+        "Seatalk image stored | user_key=%s | employee_code=%s | seatalk_id=%s | message_id=%s | image_url=%s",
+        user_key,
+        employee_code or "-",
+        seatalk_id or "-",
         message_id,
         image_url,
     )
@@ -107,11 +110,11 @@ def store_latest_image_for_user(
 def get_latest_unprocessed_image_for_user(
     store_path: Path,
     *,
-    employee_code: str,
+    user_key: str,
     command_name: str,
 ) -> dict[str, Any] | None:
     payload = _load_store(store_path)
-    entry = (payload.get("users") or {}).get(employee_code)
+    entry = (payload.get("users") or {}).get(user_key)
     if not isinstance(entry, dict):
         return None
     processed_commands = _normalize_processed_commands(entry)
@@ -123,18 +126,18 @@ def get_latest_unprocessed_image_for_user(
 def mark_image_processed_for_user(
     store_path: Path,
     *,
-    employee_code: str,
+    user_key: str,
     message_id: str,
     command_name: str,
 ) -> None:
     payload = _load_store(store_path)
-    entry = (payload.get("users") or {}).get(employee_code)
+    entry = (payload.get("users") or {}).get(user_key)
     if not isinstance(entry, dict):
         return
     if str(entry.get("message_id") or "") != str(message_id or ""):
         LOGGER.info(
-            "Skip marking processed because latest stored image changed | employee_code=%s | expected_message_id=%s | current_message_id=%s | command=%s",
-            employee_code,
+            "Skip marking processed because latest stored image changed | user_key=%s | expected_message_id=%s | current_message_id=%s | command=%s",
+            user_key,
             message_id,
             entry.get("message_id") or "-",
             command_name,
@@ -148,8 +151,8 @@ def mark_image_processed_for_user(
     entry["processed_at"] = datetime.now().isoformat(timespec="seconds")
     _save_store(store_path, payload)
     LOGGER.info(
-        "Seatalk image marked processed | employee_code=%s | message_id=%s | command=%s | processed_commands=%s",
-        employee_code,
+        "Seatalk image marked processed | user_key=%s | message_id=%s | command=%s | processed_commands=%s",
+        user_key,
         message_id,
         command_name,
         processed_commands,

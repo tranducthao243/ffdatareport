@@ -569,6 +569,19 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
         )
         return group_id, actor
 
+    def _image_actor_key(callback_context: dict[str, str]) -> str:
+        group_id = str(callback_context.get("group_id") or "").strip()
+        actor = (
+            str(callback_context.get("seatalk_id") or "").strip()
+            or str(callback_context.get("employee_code") or "").strip()
+            or str(callback_context.get("email") or "").strip()
+        )
+        if group_id and actor:
+            return f"group:{group_id}:actor:{actor}"
+        if actor:
+            return f"private:{actor}"
+        return ""
+
     def _remember_group_thread_context(callback_context: dict[str, str]) -> None:
         key = _group_actor_key(callback_context)
         if not key[0] or not key[1]:
@@ -998,13 +1011,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 group_client.send_text(reply_text)
 
         def _handle_group_image_message(self, callback_context: dict[str, str]) -> None:
-            employee_code = callback_context["employee_code"]
+            user_key = _image_actor_key(callback_context)
             image_url = callback_context.get("image_url", "")
-            if not employee_code or not image_url:
+            if not user_key or not image_url:
                 return
             store_latest_image_for_user(
                 get_image_store_path(),
-                employee_code=employee_code,
+                user_key=user_key,
+                employee_code=callback_context.get("employee_code", ""),
                 seatalk_id=callback_context.get("seatalk_id", ""),
                 message_id=callback_context.get("message_id", ""),
                 image_url=image_url,
@@ -1206,12 +1220,14 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_private_image_message(self, callback_context: dict[str, str]) -> None:
             employee_code = callback_context["employee_code"]
+            user_key = _image_actor_key(callback_context)
             image_url = callback_context.get("image_url", "")
-            if not image_url:
+            if not user_key or not image_url:
                 raise SeatalkCallbackError("Image message missing image URL.")
 
             store_latest_image_for_user(
                 get_image_store_path(),
+                user_key=user_key,
                 employee_code=employee_code,
                 seatalk_id=callback_context.get("seatalk_id", ""),
                 message_id=callback_context.get("message_id", ""),
@@ -1232,11 +1248,23 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
-            active_job = (employee_code, "uploadimage")
-            LOGGER.info("Seatalk imagelink command received | employee_code=%s", employee_code)
+            user_key = _image_actor_key(callback_context)
+            active_job = (user_key or employee_code, "uploadimage")
+            LOGGER.info(
+                "Seatalk imagelink command received | user_key=%s | employee_code=%s | seatalk_id=%s | group_id=%s",
+                user_key or "-",
+                employee_code or "-",
+                callback_context.get("seatalk_id") or "-",
+                callback_context.get("group_id") or "-",
+            )
+            if not user_key:
+                return (
+                    "**Khong xac dinh duoc nguoi gui anh**\n"
+                    "*Vui long thu lai trong chinh luong da gui anh.*"
+                )
             with private_message_lock:
                 if active_job in active_uploads:
-                    LOGGER.info("Seatalk imagelink already in progress | employee_code=%s", employee_code)
+                    LOGGER.info("Seatalk imagelink already in progress | user_key=%s", user_key or "-")
                     return (
                         "**Ảnh gần nhất của bạn đang được xử lý**\n"
                         "*Vui lòng chờ bot hoàn tất rồi thử lại nếu cần.*"
@@ -1245,7 +1273,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
-                employee_code=employee_code,
+                user_key=user_key,
                 command_name="uploadimage",
             )
             if not image_entry:
@@ -1276,7 +1304,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 final_url = upload_image_to_vendor_tool(
                     image_path,
                     owner_email=callback_context.get("email", ""),
-                    upload_filename_hint=f"seatalk-{employee_code}-{int(datetime.now().timestamp())}",
+                    upload_filename_hint=f"seatalk-{user_key or employee_code}-{int(datetime.now().timestamp())}",
                 )
             except UploadImageError as exc:
                 LOGGER.exception("Vendor upload flow failure | employee_code=%s", employee_code)
@@ -1297,7 +1325,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             mark_image_processed_for_user(
                 get_image_store_path(),
-                employee_code=employee_code,
+                user_key=user_key,
                 message_id=str(image_entry.get("message_id") or ""),
                 command_name="uploadimage",
             )
@@ -1307,12 +1335,24 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
         def _handle_removebg_command(self, callback_context: dict[str, str]) -> str:
             employee_code = callback_context["employee_code"]
-            active_job = (employee_code, "removebg")
+            user_key = _image_actor_key(callback_context)
+            active_job = (user_key or employee_code, "removebg")
             is_group_flow = bool(callback_context.get("group_id"))
-            LOGGER.info("Seatalk removebg command received | employee_code=%s", employee_code)
+            LOGGER.info(
+                "Seatalk removebg command received | user_key=%s | employee_code=%s | seatalk_id=%s | group_id=%s",
+                user_key or "-",
+                employee_code or "-",
+                callback_context.get("seatalk_id") or "-",
+                callback_context.get("group_id") or "-",
+            )
+            if not user_key:
+                return (
+                    "**Khong xac dinh duoc nguoi gui anh**\n"
+                    "*Vui long thu lai trong chinh luong da gui anh.*"
+                )
             with private_message_lock:
                 if active_job in active_uploads:
-                    LOGGER.info("Seatalk removebg already in progress | employee_code=%s", employee_code)
+                    LOGGER.info("Seatalk removebg already in progress | user_key=%s", user_key or "-")
                     return (
                         "**Anh gan nhat cua ban dang duoc xu ly**\n"
                         "*Vui long cho bot hoan tat roi thu lai neu can.*"
@@ -1321,7 +1361,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             image_entry = get_latest_unprocessed_image_for_user(
                 get_image_store_path(),
-                employee_code=employee_code,
+                user_key=user_key,
                 command_name="removebg",
             )
             if not image_entry:
@@ -1365,7 +1405,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                     final_url = upload_image_to_vendor_tool(
                         output_path,
                         owner_email=callback_context.get("email", ""),
-                        upload_filename_hint=f"seatalk-{employee_code}-removebg-{int(datetime.now().timestamp())}",
+                        upload_filename_hint=f"seatalk-{user_key or employee_code}-removebg-{int(datetime.now().timestamp())}",
                     )
                     LOGGER.info(
                         "Removebg fallback to Vendor Tool link succeeded | employee_code=%s | final_url=%s",
@@ -1414,7 +1454,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             mark_image_processed_for_user(
                 get_image_store_path(),
-                employee_code=employee_code,
+                user_key=user_key,
                 message_id=str(image_entry.get("message_id") or ""),
                 command_name="removebg",
             )
