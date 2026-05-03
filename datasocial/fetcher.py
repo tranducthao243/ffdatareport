@@ -29,6 +29,7 @@ EXPORT_DOWNLOAD_BASE_DELAY_SECONDS = 2.0
 class GraphQLClient:
     def __init__(self, settings: Settings):
         self.settings = settings
+        self._fallback_usession = str(settings.usession or "").strip()
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -44,10 +45,18 @@ class GraphQLClient:
             }
         )
 
-        self._apply_usession_cookie(settings.usession)
-        if not settings.usession and settings.has_service_account_auth:
+        if settings.has_service_account_auth:
             LOGGER.info("service_account_auth=enabled | phase=client_init")
-            self.refresh_usession_from_service_account()
+            try:
+                self.refresh_usession_from_service_account()
+            except DatasocialError as exc:
+                if not self._apply_fallback_usession_cookie(
+                    reason="service_account_init_failed",
+                    details=str(exc),
+                ):
+                    raise
+        else:
+            self._apply_usession_cookie(self._fallback_usession)
 
     def _apply_usession_cookie(self, usession: str) -> None:
         value = str(usession or "").strip()
@@ -67,6 +76,21 @@ class GraphQLClient:
         self._apply_usession_cookie(usession)
         LOGGER.info("service_account_auth=ok | phase=refresh_usession_done")
         return usession
+
+    def _apply_fallback_usession_cookie(self, *, reason: str, details: str | None = None) -> bool:
+        value = str(self._fallback_usession or "").strip()
+        if not value:
+            return False
+        current = str(self.session.cookies.get("usession") or "").strip()
+        if current == value:
+            return False
+        self._apply_usession_cookie(value)
+        LOGGER.warning(
+            "service_account_auth=fallback_usession | reason=%s | details=%s",
+            reason,
+            details or "-",
+        )
+        return True
 
     def list_posts(
         self,
@@ -656,9 +680,14 @@ class GraphQLClient:
             try:
                 self.refresh_usession_from_service_account()
             except DatasocialError as exc:
-                raise GraphQLResponseError(
-                    f"Social Data returned Unauthorized and service account refresh failed: {exc}"
-                ) from exc
+                fallback_applied = self._apply_fallback_usession_cookie(
+                    reason="service_account_refresh_failed_after_unauthorized",
+                    details=str(exc),
+                )
+                if not fallback_applied:
+                    raise GraphQLResponseError(
+                        f"Social Data returned Unauthorized and service account refresh failed: {exc}"
+                    ) from exc
             response = self.session.post(
                 self.settings.endpoint,
                 data=json.dumps(payload),
@@ -669,6 +698,29 @@ class GraphQLClient:
                 operation_name,
                 response.status_code,
             )
+            if (
+                self.settings.has_service_account_auth
+                and self._fallback_usession
+                and (
+                    response.status_code == 401
+                    or (response.ok and "Unauthorized" in response.text)
+                )
+            ):
+                fallback_applied = self._apply_fallback_usession_cookie(
+                    reason="service_account_retry_still_unauthorized",
+                    details=f"operation={operation_name}",
+                )
+                if fallback_applied:
+                    response = self.session.post(
+                        self.settings.endpoint,
+                        data=json.dumps(payload),
+                        timeout=self.settings.timeout,
+                    )
+                    LOGGER.info(
+                        "GRAPHQL fallback response | operation=%s | status=%s",
+                        operation_name,
+                        response.status_code,
+                    )
 
         if not response.ok:
             LOGGER.error(

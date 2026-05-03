@@ -23,6 +23,7 @@ jobs:
       DATASOCIAL_APP_SLUG: ffvn
       DATASOCIAL_TIMEOUT: 300
       DATASOCIAL_GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.DATASOCIAL_GOOGLE_SERVICE_ACCOUNT_JSON }}
+      # Static usession is kept only as a last-resort fallback if service-account exchange fails.
       DATASOCIAL_USESSION: ${{ secrets.DATASOCIAL_USESSION }}
       SEATALK_APP_ID: ${{ secrets.SEATALK_APP_ID }}
       SEATALK_APP_SECRET: ${{ secrets.SEATALK_APP_SECRET }}
