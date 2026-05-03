@@ -1081,8 +1081,6 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
 
             if reply_text:
                 private_client.send_text(reply_text)
-                if is_menu_shortcut and unified_user.get("role") == "superadmin":
-                    private_client.send_interactive(build_superadmin_control_payload())
                 LOGGER.info(
                     "Seatalk private command reply sent | employee_code=%s | command=%s",
                     employee_code,
