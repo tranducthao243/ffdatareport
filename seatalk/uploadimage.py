@@ -27,6 +27,10 @@ DEFAULT_VENDOR_PUBLIC_URL_PREFIX = "https://files.garena.vn/garena-social/public
 DEFAULT_VENDOR_PUBLIC_URL_BASE = "https://files.garena.vn/"
 DEFAULT_REMOVEBG_SPACE_ID = "amirgame197/Remove-Background"
 DEFAULT_REMOVEBG_API_NAME = "/predict"
+DEFAULT_UPSCALE_SPACE_ID = "shubham5027/image_upscale"
+DEFAULT_UPSCALE_API_NAME = "/predict"
+DEFAULT_UPSCALE_VERSION = "GFPGANv1.4"
+DEFAULT_UPSCALE_SCALE = 0
 DEFAULT_SEATALK_IMAGE_MAX_BYTES = 3_600_000
 
 
@@ -69,7 +73,7 @@ def _normalize_processed_commands(entry: dict[str, Any]) -> list[str]:
     if isinstance(commands, list):
         return [str(item).strip() for item in commands if str(item).strip()]
     if entry.get("processed"):
-        return ["uploadimage", "removebg"]
+        return ["uploadimage", "removebg", "upscale"]
     return []
 
 
@@ -1077,6 +1081,62 @@ def remove_background_with_space(image_path: Path) -> Path:
         image_path,
         output_path,
         asset_ref,
+    )
+    return output_path
+
+
+def upscale_image_with_space(image_path: Path) -> Path:
+    space_id = os.getenv("UPSCALE_SPACE_ID", DEFAULT_UPSCALE_SPACE_ID).strip() or DEFAULT_UPSCALE_SPACE_ID
+    api_name = os.getenv("UPSCALE_API_NAME", DEFAULT_UPSCALE_API_NAME).strip() or DEFAULT_UPSCALE_API_NAME
+    version = os.getenv("UPSCALE_VERSION", DEFAULT_UPSCALE_VERSION).strip() or DEFAULT_UPSCALE_VERSION
+    scale = int(os.getenv("UPSCALE_SCALE", str(DEFAULT_UPSCALE_SCALE)).strip() or str(DEFAULT_UPSCALE_SCALE))
+    hf_token = os.getenv("UPSCALE_HF_TOKEN", "").strip()
+
+    try:
+        from gradio_client import Client, handle_file
+    except ImportError as exc:
+        raise UploadImageError("gradio_client is not installed in the runtime.") from exc
+
+    try:
+        client_kwargs: dict[str, Any] = {}
+        if hf_token:
+            client_kwargs["hf_token"] = hf_token
+        client = Client(space_id, **client_kwargs)
+        result = client.predict(
+            img=handle_file(str(image_path)),
+            version=version,
+            scale=scale,
+            api_name=api_name,
+        )
+    except Exception as exc:
+        raise UploadImageError(f"Upscale API failed: {exc}") from exc
+
+    asset_ref = _normalize_result_asset(result)
+    if not asset_ref:
+        raise UploadImageError("Upscale API did not return an image result.")
+    _log_flow_step(
+        "upscale",
+        "space_predict",
+        "ok",
+        space_id=space_id,
+        api_name=api_name,
+        version=version,
+        scale=scale,
+    )
+
+    output_path = _download_or_copy_result_asset(
+        asset_ref,
+        filename_hint=f"{image_path.stem}-upscale",
+    )
+    output_path = convert_image_to_png(output_path)
+    _log_flow_step("upscale", "prepare_png_result", "ok", output_path=output_path, bytes=output_path.stat().st_size)
+    LOGGER.info(
+        "Upscale success | source=%s | output=%s | asset_ref=%s | version=%s | scale=%s",
+        image_path,
+        output_path,
+        asset_ref,
+        version,
+        scale,
     )
     return output_path
 

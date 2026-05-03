@@ -53,6 +53,7 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
         help_text = build_private_help_text("admin")
         usage_text = build_private_usage_text()
         self.assertIn("`kol`", help_text)
+        self.assertIn("`upscale`", help_text)
         self.assertNotIn("ducthao.tran@garena.vn", help_text)
         self.assertIn("ducthao.tran@garena.vn", usage_text)
 
@@ -86,6 +87,8 @@ class DatasocialSeatalkFormatterTests(unittest.TestCase):
     def test_imagelink_command_alias_is_detected(self):
         self.assertEqual(classify_private_command("imagelink"), "imagelink")
         self.assertEqual(classify_private_command("uploadimage"), "imagelink")
+        self.assertEqual(classify_private_command("upscale"), "upscale")
+        self.assertEqual(classify_private_command("enhanceimage"), "upscale")
         self.assertEqual(classify_private_command("kol hieu dau da"), "kol")
         self.assertEqual(normalize_command_text("Hiếu Đầu Đà"), "hieu dau da")
 

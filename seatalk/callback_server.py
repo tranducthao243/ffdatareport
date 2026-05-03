@@ -72,6 +72,7 @@ from .uploadimage import (
     send_seatalk_text_reply,
     store_latest_image_for_user,
     summarize_upload_error,
+    upscale_image_with_space,
     upload_image_to_vendor_tool,
 )
 
@@ -143,6 +144,7 @@ def _build_private_help_text(role: str) -> str:
             "**Tính năng khác**",
             "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",
             "- `removebg`: tách nền ảnh và trả lại ảnh",
+            "- `upscale`: nâng cấp chất lượng ảnh và trả lại ảnh",
             "- `shortlink`: tạo shortlink từ link và config",
             "- `enhanceimage`: làm nét ảnh rồi trả kết quả",
             "",
@@ -221,6 +223,7 @@ def _build_private_help_text(role: str) -> str:
             "**Tính năng khác**",
             "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",
             "- `removebg`: tách nền ảnh và trả lại ảnh",
+            "- `upscale`: nâng cấp chất lượng ảnh và trả lại ảnh",
             "- `shortlink`: tạo shortlink từ link và config",
             "- `enhanceimage`: làm nét ảnh rồi trả kết quả",
             "",
@@ -1007,7 +1010,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command == "removebg":
                 group_client.send_text("**Removebg đang chạy**\n*Tôi đang tách nền ảnh, vui lòng chờ một chút...*")
                 reply_text = self._handle_removebg_command(callback_context)
-            elif command in {"shortlink", "enhanceimage"}:
+            elif command == "upscale":
+                group_client.send_text("**Upscale đang chạy**\n*Tôi đang nâng cấp chất lượng ảnh, vui lòng chờ một chút...*")
+                reply_text = self._handle_upscale_command(callback_context)
+            elif command == "shortlink":
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif is_menu_shortcut:
                 reply_text = service_build_private_help_text("admin")
@@ -1041,7 +1047,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
             )
             self._build_group_client(callback_context).send_text(
-                "Đã nhận ảnh gần nhất của bạn trong luồng này.\nGõ `imagelink` để tải ảnh lên web nội bộ.\nGõ `removebg` để tách nền ảnh."
+                "Đã nhận ảnh gần nhất của bạn trong luồng này.\nGõ `imagelink` để tải ảnh lên web nội bộ.\nGõ `removebg` để tách nền ảnh.\nGõ `upscale` để nâng cấp chất lượng ảnh."
             )
 
         def _handle_private_message(self, event: dict[str, Any]) -> None:
@@ -1103,7 +1109,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             normalized_message_text = normalize_command_text(message_text)
             command = classify_private_command(message_text)
             is_menu_shortcut = normalized_message_text == "."
-            if command in {"imagelink", "removebg"} and message_id:
+            if command in {"imagelink", "removebg", "upscale"} and message_id:
                 with private_message_lock:
                     if message_id in handled_private_message_ids:
                         LOGGER.info(
@@ -1209,7 +1215,10 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif command == "removebg":
                 private_client.send_text("**Removebg đang chạy**\n*Tôi đang tách nền ảnh, vui lòng chờ một chút...*")
                 reply_text = self._handle_removebg_command(callback_context)
-            elif command in {"shortlink", "enhanceimage"}:
+            elif command == "upscale":
+                private_client.send_text("**Upscale đang chạy**\n*Tôi đang nâng cấp chất lượng ảnh, vui lòng chờ một chút...*")
+                reply_text = self._handle_upscale_command(callback_context)
+            elif command == "shortlink":
                 reply_text = PRIVATE_FUTURE_FEATURE_MESSAGE
             elif is_menu_shortcut:
                 reply_text = service_build_private_help_text(unified_user.get("role", "admin"))
@@ -1259,7 +1268,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             )
             send_seatalk_text_reply(
                 client,
-                "Đã nhận ảnh gần nhất của bạn.\nGõ 'imagelink' để tải ảnh lên web nội bộ.\nGõ 'removebg' để tách nền ảnh.",
+                "Đã nhận ảnh gần nhất của bạn.\nGõ 'imagelink' để tải ảnh lên web nội bộ.\nGõ 'removebg' để tách nền ảnh.\nGõ 'upscale' để nâng cấp chất lượng ảnh.",
             )
 
         def _handle_uploadimage_command(self, callback_context: dict[str, str]) -> str:
@@ -1473,6 +1482,133 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
                 user_key=user_key,
                 message_id=str(image_entry.get("message_id") or ""),
                 command_name="removebg",
+            )
+            with private_message_lock:
+                active_uploads.discard(active_job)
+            return fallback_reply
+
+        def _handle_upscale_command(self, callback_context: dict[str, str]) -> str:
+            employee_code = callback_context["employee_code"]
+            user_key = _image_actor_key(callback_context)
+            active_job = (user_key or employee_code, "upscale")
+            is_group_flow = bool(callback_context.get("group_id"))
+            LOGGER.info(
+                "Seatalk upscale command received | user_key=%s | employee_code=%s | seatalk_id=%s | group_id=%s",
+                user_key or "-",
+                employee_code or "-",
+                callback_context.get("seatalk_id") or "-",
+                callback_context.get("group_id") or "-",
+            )
+            if not user_key:
+                return (
+                    "**Khong xac dinh duoc nguoi gui anh**\n"
+                    "*Vui long thu lai trong chinh luong da gui anh.*"
+                )
+            with private_message_lock:
+                if active_job in active_uploads:
+                    LOGGER.info("Seatalk upscale already in progress | user_key=%s", user_key or "-")
+                    return (
+                        "**Anh gan nhat cua ban dang duoc xu ly**\n"
+                        "*Vui long cho bot hoan tat roi thu lai neu can.*"
+                    )
+                active_uploads.add(active_job)
+
+            image_entry = get_latest_unprocessed_image_for_user(
+                get_image_store_path(),
+                user_key=user_key,
+                command_name="upscale",
+            )
+            if not image_entry:
+                with private_message_lock:
+                    active_uploads.discard(active_job)
+                return (
+                    "**Chua co anh nao de upscale**\n"
+                    "*Hay gui mot anh cho bot truoc, sau do go `upscale`.*"
+                )
+
+            try:
+                image_path = download_seatalk_image(
+                    image_url=str(image_entry.get("image_url") or "").strip(),
+                    app_id=runtime["seatalk_app_id"],
+                    app_secret=runtime["seatalk_app_secret"],
+                    filename_hint=str(image_entry.get("message_id") or employee_code),
+                )
+                output_path = upscale_image_with_space(image_path)
+                fallback_reply = ""
+
+                delivery_client = (
+                    self._build_group_client(callback_context)
+                    if is_group_flow
+                    else build_seatalk_client(
+                        app_id=runtime["seatalk_app_id"],
+                        app_secret=runtime["seatalk_app_secret"],
+                        employee_code=employee_code,
+                        thread_id=callback_context.get("thread_id") or callback_context.get("message_id", ""),
+                    )
+                )
+                try:
+                    send_seatalk_image_reply(delivery_client, output_path)
+                except SeaTalkError as exc:
+                    LOGGER.warning(
+                        "SeaTalk direct image reply failed for upscale; falling back to Vendor Tool link | employee_code=%s | error=%s",
+                        employee_code,
+                        exc,
+                    )
+                    final_url = upload_image_to_vendor_tool(
+                        output_path,
+                        owner_email=callback_context.get("email", ""),
+                        upload_filename_hint=f"seatalk-{user_key or employee_code}-upscale-{int(datetime.now().timestamp())}",
+                    )
+                    LOGGER.info(
+                        "Upscale fallback to Vendor Tool link succeeded | employee_code=%s | final_url=%s",
+                        employee_code,
+                        final_url,
+                    )
+                    try:
+                        delivery_client.send_image_url(final_url)
+                        LOGGER.info(
+                            "Upscale vendor image URL reply succeeded | employee_code=%s | final_url=%s",
+                            employee_code,
+                            final_url,
+                        )
+                        fallback_reply = (
+                            "**Upscale anh thanh cong**\n"
+                            f"*Toi da gui lai anh PNG bang URL anh.*\n"
+                            f"- Link ảnh: {final_url}"
+                        )
+                    except SeaTalkError as nested_exc:
+                        LOGGER.warning(
+                            "Upscale vendor image URL reply failed; falling back to text link | employee_code=%s | error=%s",
+                            employee_code,
+                            nested_exc,
+                        )
+                        fallback_reply = (
+                            "**Upscale anh thanh cong**\n"
+                            "*SeaTalk khong nhan anh truc tiep, nen toi tra lai link PNG ket qua.*\n"
+                            f"- Link ảnh: {final_url}"
+                        )
+            except UploadImageError as exc:
+                LOGGER.exception("Upscale flow failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(active_job)
+                return (
+                    "**Upscale anh that bai**\n"
+                    f"*Chi tiet: {summarize_upload_error(exc)}*"
+                )
+            except Exception as exc:
+                LOGGER.exception("Unexpected upscale failure | employee_code=%s", employee_code)
+                with private_message_lock:
+                    active_uploads.discard(active_job)
+                return (
+                    "**Upscale anh that bai**\n"
+                    f"*Chi tiet: {summarize_upload_error(exc)}*"
+                )
+
+            mark_image_processed_for_user(
+                get_image_store_path(),
+                user_key=user_key,
+                message_id=str(image_entry.get("message_id") or ""),
+                command_name="upscale",
             )
             with private_message_lock:
                 active_uploads.discard(active_job)

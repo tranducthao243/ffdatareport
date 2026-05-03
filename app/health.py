@@ -111,8 +111,8 @@ def classify_private_command(text: str) -> str:
         return "shortlink"
     if normalized in {"imagelink", "uploadimage", "upload anh", "gui anh len web", "up anh"}:
         return "imagelink"
-    if normalized in {"enhanceimage", "lam net anh", "lam net", "upscale"}:
-        return "enhanceimage"
+    if normalized in {"enhanceimage", "lam net anh", "lam net", "upscale", "nang cap anh"}:
+        return "upscale"
     if normalized in {"removebg", "tach nen", "xoa nen", "remove background"}:
         return "removebg"
     return "unknown"

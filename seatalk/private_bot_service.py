@@ -62,6 +62,7 @@ def build_private_help_text(role: str) -> str:
             "**Tính năng khác**",
             "- `imagelink`: tải ảnh lên web nội bộ và trả link ảnh",
             "- `removebg`: tách nền ảnh và trả lại ảnh",
+            "- `upscale`: nâng cấp chất lượng ảnh và trả lại ảnh",
             "",
             "**Hướng dẫn**",
             "- `help`: xem cách dùng bot",
