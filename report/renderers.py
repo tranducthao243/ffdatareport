@@ -205,6 +205,8 @@ def render_topg(section: dict[str, Any]) -> list[str]:
     lines.append("")
     lines.append(f"*Top 10 kênh có tổng view nhiều nhất 30 ngày qua: `{section['monthWindow']['from']} -> {section['monthWindow']['to']}`*")
     lines.extend(render_ranked_channels(section.get("topMonthlyChannels", [])))
+    lines.append("")
+    lines.append("*L?u ?: D? li?u n?y c? th? ch?a ??y ?? v? g?p v?n ?? v?i c?c k?nh TikTok c?a category n?y.*")
     return lines
 
 

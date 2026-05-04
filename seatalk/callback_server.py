@@ -1018,7 +1018,7 @@ def make_handler(runtime: dict[str, Any]) -> type[BaseHTTPRequestHandler]:
             elif is_menu_shortcut:
                 reply_text = service_build_private_help_text("admin")
             elif command == "help":
-                reply_text = service_build_private_usage_text()
+                reply_text = service_build_private_help_text("admin")
             else:
                 reply_text = answer_data_question(
                     runtime["db_path"],

@@ -42,6 +42,7 @@ def build_private_help_text(role: str) -> str:
                 "- `fetch`: quét dữ liệu mới từ workflow FFVN Daily Fetch",
                 "- `send`: gửi báo cáo từ workflow FFVN Daily Send",
                 "- `so1`: gửi gói SO1 giống group chung kèm biểu đồ",
+                "- `chart`: xem nhanh các biểu đồ 30 ngày",
                 "",
             ]
         )
@@ -51,7 +52,6 @@ def build_private_help_text(role: str) -> str:
             "- `web`: liệt kê các link web quan trọng của team",
             "- `hashtag`: gõ hashtag và tên hashtag để check data",
             "- `kol`: gõ `kol <tên KOL>` để check data theo KOL",
-            "- `chart`: xem nhanh các biểu đồ 30 ngày",
             "",
             "**Dữ liệu KOLs**",
             "- `campaign`: báo cáo campaign hiện tại",
