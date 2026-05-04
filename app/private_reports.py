@@ -240,7 +240,7 @@ def _format_channel_summary(posts: list[StorePost], *, limit: int) -> list[str]:
 def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: datetime | None = None) -> str:
     query = _extract_kol_query(text)
     if not query:
-        return "KOL: -\n\nVui lòng dùng cú pháp: `kol <tên KOL>`."
+        return "KOL: -\n\nVui long dung cu phap: `kol <ten KOL>`."
 
     posts = load_posts(db_path)
     mapping = _load_kol_mapping(mapping_path)
@@ -248,9 +248,9 @@ def format_kol_report(db_path: Path, text: str, *, mapping_path: Path, now: date
     if not entry:
         return (
             f"KOL: {query}\n\n"
-            "Không tìm thấy cấu hình hoặc tên kênh KOL trong hệ thống.\n"
-            "Hãy bổ sung KOL vào `config/kol_channels.json` với `name`, `aliases` và `channels`, "
-            "hoặc gõ đúng tên kênh KOL đang có trong data."
+            "Khong tim thay cau hinh hoac ten kenh KOL trong he thong.\n"
+            "Hay bo sung KOL vao `config/kol_channels.json` voi `name`, `aliases` va `channels`, "
+            "hoac go dung ten kenh KOL dang co trong data."
         )
 
     start_date, end_date = _recent_window(30, now=now)
